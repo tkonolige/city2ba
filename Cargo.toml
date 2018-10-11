@@ -1,0 +1,23 @@
+[package]
+name = "city2bal"
+version = "0.1.0"
+authors = ["Tristan Konolige <tristan.konolige@gmail.com>"]
+build = "build.rs"
+
+[dependencies]
+tobj = "*"
+cgmath = "*"
+structopt = "*"
+rand = "*"
+ply-rs = "*"
+poisson = {git = "https://github.com/tkonolige/poisson-rs.git"}
+nalgebra = "*"
+itertools = "*"
+embree = {path = "/Users/tristan/Sync/Research/bundle_adjustment/embree-rs"}
+# embree = {git = "https://github.com/tkonolige/embree-rs.git"}
+petgraph = "*"
+rayon = "*"
+nom = "*"
+
+[profile.release]
+debug = true
