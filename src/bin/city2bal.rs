@@ -2,7 +2,6 @@ extern crate cgmath;
 extern crate embree;
 extern crate itertools;
 extern crate nalgebra as na;
-extern crate petgraph;
 extern crate ply_rs;
 extern crate poisson;
 extern crate rand;
@@ -14,18 +13,17 @@ use itertools::Itertools;
 use rand::{thread_rng, Rng};
 use structopt::StructOpt;
 
-use ply_rs::ply::{Addable, DefaultElement, ElementDef, Ply, Property, PropertyDef, PropertyType,
-                  ScalarType};
+use ply_rs::ply::{
+    Addable, DefaultElement, ElementDef, Ply, Property, PropertyDef, PropertyType, ScalarType,
+};
 use ply_rs::writer::Writer;
 
 use std::fs::File;
-use std::io::{BufWriter, Write};
+use std::io::BufWriter;
 
 use cgmath::prelude::*;
 use cgmath::{ElementWise, InnerSpace, Vector3, Vector4};
 use embree::Geometry;
-
-use petgraph::visit::EdgeRef;
 
 use rayon::prelude::*;
 
@@ -88,11 +86,12 @@ fn axis_angle_from_quaternion(q: &cgmath::Quaternion<f32>) -> Vector3<f32> {
 
     let sin_theta = (q1 * q1 + q2 * q2 + q3 * q3).sqrt();
     let cos_theta = q[0];
-    let two_theta = 2.0 * (if cos_theta < 0.0 {
-        f32::atan2(-sin_theta, -cos_theta)
-    } else {
-        f32::atan2(sin_theta, cos_theta)
-    });
+    let two_theta = 2.0
+        * (if cos_theta < 0.0 {
+            f32::atan2(-sin_theta, -cos_theta)
+        } else {
+            f32::atan2(sin_theta, cos_theta)
+        });
     let k = two_theta / sin_theta;
     Vector3::new(q1 * k, q2 * k, q3 * k)
 }
@@ -108,7 +107,8 @@ fn generate_cameras_grid(scene: &embree::Scene, num_points: usize) -> Vec<Camera
         num_points * 2, // x2 seems to get us closer to the desired amount
         1.0,
         poisson::Type::Normal,
-    ).build(rand::thread_rng(), poisson::algorithm::Bridson);
+    )
+    .build(rand::thread_rng(), poisson::algorithm::Bridson);
     let samples = poisson.generate();
 
     let bounds = scene.bounds();
@@ -146,8 +146,7 @@ fn generate_cameras_grid(scene: &embree::Scene, num_points: usize) -> Vec<Camera
             Camera {
                 loc: position,
                 dir: axis_angle_from_quaternion(&(around_z * down_x)),
-                focal_length: 1.0,
-                distortion: (0.0, 0.0),
+                intrin: Vector3::new(1.0, 0.0, 0.0),
                 img_size: (1024, 1024),
             }
         })
@@ -191,12 +190,12 @@ fn generate_world_points_poisson(
     num_points: usize,
 ) -> Vec<Vector3<f32>> {
     // calculate total area
-    let total_area: f64 = models
+    let total_area: f32 = models
         .iter()
         .map(|model| {
             iter_triangles(model)
-                .map(|(v0, v1, v2)| ((v1 - v0).cross(v2 - v0).magnitude() / 2.0) as f64)
-                .sum::<f64>()
+                .map(|(v0, v1, v2)| ((v1 - v0).cross(v2 - v0).magnitude() / 2.0) as f32)
+                .sum::<f32>()
         })
         .sum();
 
@@ -204,14 +203,14 @@ fn generate_world_points_poisson(
 
     for model in models {
         for (v0, v1, v2) in iter_triangles(model) {
-            let area = ((v1 - v0).cross(v2 - v0).magnitude() / 2.0) as f64;
-            let mut num_samples = area / total_area * num_points as f64;
+            let area = ((v1 - v0).cross(v2 - v0).magnitude() / 2.0) as f32;
+            let mut num_samples = area / total_area * num_points as f32;
             // TODO: fix this probability
             while num_samples > 1.0 {
                 points.push(random_point_in_triangle(v0, v1, v2));
                 num_samples -= 1.0;
             }
-            if thread_rng().gen_bool(num_samples) {
+            if thread_rng().gen_bool(num_samples as f64) {
                 points.push(random_point_in_triangle(v0, v1, v2));
             }
         }
@@ -308,123 +307,16 @@ fn visibility_graph(
                 .filter(|x| !*x.0)
                 .map(|x| x.1)
                 .collect()
-        }).collect()
-}
-
-/// Get the largest connected component of cameras and points.
-fn largest_connected_component(
-    vis_graph: &Vec<Vec<(usize, (f32, f32))>>,
-    cameras: &Vec<Camera>,
-    points: &Vec<Vector3<f32>>,
-) -> (
-    Vec<Vec<(usize, (f32, f32))>>,
-    Vec<Camera>,
-    Vec<Vector3<f32>>,
-) {
-    let num_edges = vis_graph
-        .iter()
-        .map(|adj| adj.iter().map(|x| x.0).sum::<usize>())
-        .sum();
-    let num_cameras = vis_graph.len();
-    let mut g = petgraph::Graph::<bool, _, petgraph::Undirected, usize>::with_capacity(
-        num_cameras,
-        num_edges,
-    );
-    for (i, adj) in vis_graph.iter().enumerate() {
-        g.extend_with_edges(adj.iter().map(|o| (i, o.0 + num_cameras, o.1)));
-    }
-
-    let cc = petgraph::algo::tarjan_scc(&g);
-    let largest = cc.iter().max_by_key(|&v| v.len()).unwrap();
-
-    let mut node_id_map = vec![None; g.node_count()];
-    let num_cameras_left = largest.iter().filter(|i| i.index() < num_cameras).count();
-    let mut camera_count = 0;
-    let mut point_count = 0;
-    let mut new_points = Vec::new();
-    let mut new_cameras = Vec::new();
-
-    for node_id in largest {
-        if node_id.index() >= num_cameras {
-            // is a point
-            node_id_map[node_id.index()] = Some(num_cameras_left + point_count);
-            new_points.push(points[node_id.index() - num_cameras]);
-            point_count += 1;
-        } else {
-            // is a camera
-            node_id_map[node_id.index()] = Some(camera_count);
-            new_cameras.push(cameras[node_id.index()].clone());
-            camera_count += 1;
-        }
-    }
-
-    // store node ids in the weight of the node
-    let lcc = g.filter_map(
-        |node_id, _| node_id_map[node_id.index()],
-        |_, edge| Some(edge),
-    );
-
-    let mut adj = vec![Vec::new(); num_cameras_left];
-    for edge in lcc.edge_references() {
-        let (c, p) = if edge.source().index() < num_cameras_left {
-            (edge.source(), edge.target())
-        } else {
-            (edge.target(), edge.source())
-        };
-
-        adj[*lcc.node_weight(c).unwrap()].push((
-            lcc.node_weight(p).unwrap() - num_cameras_left,
-            **edge.weight(),
-        ));
-    }
-
-    (adj, new_cameras, new_points)
-}
-
-fn write_bal(
-    path: &std::path::Path,
-    cameras: &Vec<Camera>,
-    points: &Vec<Vector3<f32>>,
-    vis_graph: &Vec<Vec<(usize, (f32, f32))>>,
-) {
-    let mut file = BufWriter::new(File::create(path).unwrap());
-    writeln!(
-        &mut file,
-        "{} {} {}",
-        cameras.len(),
-        points.len(),
-        vis_graph.iter().map(|x| x.len()).sum::<usize>()
-    );
-    for (i, obs) in vis_graph.iter().enumerate() {
-        for (p, (u, v)) in obs {
-            writeln!(&mut file, "{} {} {} {}", i, p, u, v);
-        }
-    }
-
-    // TODO: actually pass around the intrinsics
-    for camera in cameras {
-        writeln!(
-            &mut file,
-            "{} {} {} {} {} {} {} {} {}",
-            camera.dir[0],
-            camera.dir[1],
-            camera.dir[2],
-            camera.loc[0],
-            camera.loc[1],
-            camera.loc[2],
-            1.0,
-            0.0,
-            0.0
-        );
-    }
-
-    for point in points {
-        writeln!(&mut file, "{} {} {}", point[0], point[1], point[2]);
-    }
+        })
+        .collect()
 }
 
 /// Write camera locations out to a ply file. Does not provide color or orientation.
-fn write_cameras(path: &std::path::Path, cameras: &Vec<Camera>, points: &Vec<Vector3<f32>>) {
+fn write_cameras(
+    path: &std::path::Path,
+    cameras: &Vec<Camera>,
+    points: &Vec<Vector3<f32>>,
+) -> Result<(), std::io::Error> {
     let mut ply = Ply::<DefaultElement>::new();
     let mut point_element = ElementDef::new("vertex".to_string());
     let p = PropertyDef::new("x".to_string(), PropertyType::Scalar(ScalarType::Float));
@@ -471,16 +363,64 @@ fn write_cameras(path: &std::path::Path, cameras: &Vec<Camera>, points: &Vec<Vec
 
     ply.payload.insert("vertex".to_string(), cs);
 
-    let mut file = BufWriter::new(File::create(path).unwrap());
+    let mut file = BufWriter::new(File::create(path)?);
     let writer = Writer::new();
-    writer.write_ply(&mut file, &mut ply).unwrap();
+    writer.write_ply(&mut file, &mut ply).map(|_| ())
 }
 
-fn main() {
+fn normalize(models: &Vec<tobj::Model>) -> Vec<tobj::Model> {
+    let min_vec = |x: Vector3<f32>, y: Vector3<f32>| {
+        Vector3::new(x[0].min(y[0]), x[1].min(y[1]), x[2].min(y[2]))
+    };
+    let min_locs = models
+        .iter()
+        .map(|model| {
+            model
+                .mesh
+                .positions
+                .chunks(3)
+                .map(|chunk| Vector3::new(chunk[0], chunk[1], chunk[2]))
+                .fold1(|x, y| min_vec(x, y))
+                .unwrap()
+        })
+        .fold1(|x, y| min_vec(x, y))
+        .unwrap();
+
+    models
+        .iter()
+        .map(|model| {
+            let new_positions = model
+                .mesh
+                .positions
+                .chunks(3)
+                .map(|chunk| {
+                    let x = Vector3::new(chunk[0], chunk[1], chunk[2]) - min_locs;
+                    // ignore z for now
+                    vec![x[0], x[1], chunk[2]].into_iter()
+                })
+                .flatten()
+                .collect();
+            tobj::Model::new(
+                tobj::Mesh::new(
+                    new_positions,
+                    model.mesh.normals.clone(),
+                    model.mesh.texcoords.clone(),
+                    model.mesh.indices.clone(),
+                    model.mesh.material_id,
+                ),
+                model.name.clone(),
+            )
+        })
+        .collect()
+}
+
+fn main() -> Result<(), std::io::Error> {
     let opt = Opt::from_args();
 
     let city_obj = tobj::load_obj(&opt.input);
-    let (models, _) = city_obj.unwrap();
+    let (models_, _) = city_obj.unwrap();
+
+    let models = normalize(&models_);
 
     // create embree device
     let dev = embree::Device::new();
@@ -508,23 +448,28 @@ fn main() {
         "Computed visibility graph with {} edges",
         vis_graph.iter().map(|x| x.len()).sum::<usize>()
     );
-    let (lcc, lcc_cameras, lcc_points) = largest_connected_component(&vis_graph, &cameras, &points);
+    let bal = BALProblem {
+        cameras: cameras,
+        points: points,
+        vis_graph: vis_graph,
+    };
+    let bal_lcc = bal.largest_connected_component();
     println!(
         "Computed LCC with {} cameras, {} points, {} edges",
-        lcc_cameras.len(),
-        lcc_points.len(),
-        lcc.iter().map(|x| x.len()).sum::<usize>()
+        bal_lcc.cameras.len(),
+        bal_lcc.points.len(),
+        bal_lcc.vis_graph.iter().map(|x| x.len()).sum::<usize>()
     );
 
     println!(
         "Total reprojection error: {}",
-        total_reprojection_error(&lcc, &lcc_cameras, &lcc_points)
+        bal_lcc.total_reprojection_error()
     );
 
-    write_bal(&opt.bal_out, &lcc_cameras, &lcc_points, &lcc);
+    bal_lcc.write(&opt.bal_out)?;
 
     match opt.ply_out {
-        Some(path) => write_cameras(&path, &lcc_cameras, &lcc_points),
-        None => (),
+        Some(path) => write_cameras(&path, &bal_lcc.cameras, &bal_lcc.points),
+        None => Ok(()),
     }
 }

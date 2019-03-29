@@ -10,9 +10,18 @@ struct Opt {
     input: std::path::PathBuf,
 }
 
-fn main() {
+fn main() -> Result<(), Error> {
     let opt = Opt::from_args();
 
-    let bal_problem = BALProblem::from_file(&opt.input);
-    println!("{} total reprojection error", bal_problem.total_reprojection_error());
+    let bal_problem = BALProblem::from_file(&opt.input)?;
+    println!(
+        "{} total reprojection error",
+        bal_problem.total_reprojection_error()
+    );
+    println!(
+        "{} total reprojection error (L2)",
+        bal_problem.total_reprojection_error_l2()
+    );
+
+    Ok(())
 }
