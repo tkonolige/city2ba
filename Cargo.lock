@@ -132,7 +132,7 @@ name = "city2bal"
 version = "0.1.0"
 dependencies = [
  "cgmath 0.17.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "embree-rs 0.3.3",
+ "embree-rs 0.3.3 (git+https://github.com/tkonolige/embree-rs.git)",
  "indicatif 0.11.0 (git+https://github.com/mitsuhiko/indicatif.git)",
  "itertools 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "nalgebra 0.17.3 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -235,6 +235,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "embree-rs"
 version = "0.3.3"
+source = "git+https://github.com/tkonolige/embree-rs.git#96a1804b32e9bc7cd7bf02a03e0f7ec31a4b229b"
 dependencies = [
  "cgmath 0.17.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -1000,6 +1001,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum crossbeam-epoch 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)" = "927121f5407de9956180ff5e936fe3cf4324279280001cd56b669d28ee7e9150"
 "checksum crossbeam-utils 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)" = "2760899e32a1d58d5abb31129f8fae5de75220bc2176e77ff7c627ae45c918d9"
 "checksum either 1.5.2 (registry+https://github.com/rust-lang/crates.io-index)" = "5527cfe0d098f36e3f8839852688e63c8fff1c90b2b405aef730615f9a7bcf7b"
+"checksum embree-rs 0.3.3 (git+https://github.com/tkonolige/embree-rs.git)" = "<none>"
 "checksum encode_unicode 0.3.5 (registry+https://github.com/rust-lang/crates.io-index)" = "90b2c9496c001e8cb61827acdefad780795c42264c137744cae6f7d9e3450abd"
 "checksum error-chain 0.12.0 (registry+https://github.com/rust-lang/crates.io-index)" = "07e791d3be96241c77c43846b665ef1384606da2cd2a48730abe606a12906e02"
 "checksum fixedbitset 0.1.9 (registry+https://github.com/rust-lang/crates.io-index)" = "86d4de0081402f5e88cdac65c8dcdcc73118c1a7a465e2a05f0da05843a8ea33"

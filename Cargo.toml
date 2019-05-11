@@ -11,11 +11,10 @@ structopt = "*"
 rand = "0.6"
 ply-rs = "*"
 poisson = {git = "https://github.com/WaDelma/poisson.git"}
-# poisson = {path = "/Users/tristan/Build/poisson/poisson"}
 nalgebra = "0.17"
 itertools = "*"
-# embree-rs = {git = "https://github.com/Twinklebear/embree-rs.git"}
-embree-rs = {path = "/Users/tristan/Sync/Research/bundle_adjustment/embree-rs"}
+embree-rs = {git = "https://github.com/tkonolige/embree-rs.git"}
+# embree-rs = {path = "/Users/tristan/Sync/Research/bundle_adjustment/embree-rs"}
 petgraph = "*"
 rayon = "*"
 nom = "*"
