@@ -1,5 +1,5 @@
 extern crate cgmath;
-extern crate embree;
+extern crate embree_rs;
 extern crate itertools;
 extern crate nalgebra as na;
 extern crate ply_rs;
@@ -7,11 +7,14 @@ extern crate poisson;
 extern crate rand;
 extern crate rayon;
 extern crate structopt;
+extern crate indicatif;
 extern crate tobj;
 
 use itertools::Itertools;
 use rand::{thread_rng, Rng};
 use structopt::StructOpt;
+
+use indicatif::{ParallelProgressIterator, ProgressBar, ProgressStyle};
 
 use ply_rs::ply::{
     Addable, DefaultElement, ElementDef, Ply, Property, PropertyDef, PropertyType, ScalarType,
@@ -20,15 +23,16 @@ use ply_rs::writer::Writer;
 
 use std::fs::File;
 use std::io::BufWriter;
+use std::convert::TryInto;
 
 use cgmath::prelude::*;
 use cgmath::{ElementWise, InnerSpace, Vector3, Vector4};
-use embree::Geometry;
 
 use rayon::prelude::*;
 
 extern crate city2bal;
 use city2bal::*;
+
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "basic")]
@@ -49,10 +53,10 @@ struct Opt {
     bal_out: std::path::PathBuf,
 }
 
-fn add_model<'a>(model: &tobj::Model, dev: &'a embree::Device) -> embree::TriangleMesh<'a> {
+fn add_model<'a>(model: &tobj::Model, dev: &'a embree_rs::Device) -> embree_rs::Geometry<'a> {
     let num_tri = model.mesh.indices.len() / 3;
     let num_vert = model.mesh.positions.len() / 3;
-    let mut mesh = embree::TriangleMesh::unanimated(dev, num_tri, num_vert);
+    let mut mesh = embree_rs::TriangleMesh::unanimated(dev, num_tri, num_vert);
 
     {
         let mut verts = mesh.vertex_buffer.map();
@@ -75,8 +79,9 @@ fn add_model<'a>(model: &tobj::Model, dev: &'a embree::Device) -> embree::Triang
         }
     }
 
-    mesh.commit();
-    mesh
+    let mut geo = embree_rs::Geometry::Triangle(mesh);
+    geo.commit();
+    geo
 }
 
 fn axis_angle_from_quaternion(q: &cgmath::Quaternion<f32>) -> Vector3<f32> {
@@ -99,8 +104,8 @@ fn axis_angle_from_quaternion(q: &cgmath::Quaternion<f32>) -> Vector3<f32> {
 // Generate camera locations by placing cameras on a regular grid throughout the image. Locations
 // are then filtered based on their height.
 // TODO: smarter pattern for points. choose initial point and expand search?
-fn generate_cameras_grid(scene: &embree::Scene, num_points: usize) -> Vec<Camera> {
-    let mut intersection_ctx = embree::IntersectContext::coherent(); // not sure if this matters
+fn generate_cameras_grid(scene: &embree_rs::CommittedScene, num_points: usize) -> Vec<Camera> {
+    let mut intersection_ctx = embree_rs::IntersectContext::coherent(); // not sure if this matters
     let mut positions = Vec::new();
 
     let poisson = poisson::Builder::<f32, na::Vector2<f32>>::with_samples(
@@ -123,8 +128,9 @@ fn generate_cameras_grid(scene: &embree::Scene, num_points: usize) -> Vec<Camera
     for sample in samples {
         let origin = start - delta.mul_element_wise(Vector3::new(sample[0], sample[1], 0.0));
         let direction = Vector3::new(0.0, 0.0, -1.0); // looking directly down
-        let ray = embree::Ray::new(origin, direction);
-        let ray_hit = scene.intersect(&mut intersection_ctx, ray);
+        let ray = embree_rs::Ray::new(origin, direction);
+        let mut ray_hit = embree_rs::RayHit::new(ray);
+        scene.intersect(&mut intersection_ctx, &mut ray_hit);
         if ray_hit.hit.hit() {
             // push point up a little from where it hit
             let pt = origin + direction * ray_hit.ray.tfar + Vector3::new(0.0, 0.0, 1.0);
@@ -221,14 +227,14 @@ fn generate_world_points_poisson(
 
 /*
 fn generate_world_points(
-    scene: &embree::Scene,
+    scene: &embree_rs::Scene,
     cameras: &Vec<CameraPose>,
     num_points: usize,
 ) -> Vec<Vector3<f32>> {
     let img_size = (1024, 1024);
 
     let mut points = Vec::new();
-    let mut intersection_ctx = embree::IntersectContext::incoherent(); // not sure if this matters
+    let mut intersection_ctx = embree_rs::IntersectContext::incoherent(); // not sure if this matters
 
     for camera in cameras {
         let cam = Camera::look_dir(
@@ -248,7 +254,7 @@ fn generate_world_points(
 
         for sample in samples {
             let dir = cam.ray_dir((sample[0] * img_size.0 as f32, sample[1] * img_size.0 as f32));
-            let mut ray = embree::Ray::new(camera.loc, dir);
+            let mut ray = embree_rs::Ray::new(camera.loc, dir);
             ray.tnear = 0.001; // TODO: what to use here?
             let ray_hit = scene.intersect(&mut intersection_ctx, ray);
             if ray_hit.hit.hit() {
@@ -262,14 +268,20 @@ fn generate_world_points(
 */
 
 fn visibility_graph(
-    scene: &embree::Scene,
+    scene: &embree_rs::CommittedScene,
     cameras: &Vec<Camera>,
     points: &Vec<Vector3<f32>>,
 ) -> Vec<Vec<(usize, (f32, f32))>> {
+
+    let pb = ProgressBar::new(cameras.len().try_into().unwrap());
+    pb.set_style(ProgressStyle::default_bar()
+                 .template("[{bar:40}] {pos}/{len} ({eta})")
+                 .progress_chars("#-"));
+
     cameras
-        .par_iter() // TODO: use par_iter
+        .par_iter().progress_with(pb)
         .map(|camera| {
-            let mut intersection_ctx = embree::IntersectContext::incoherent(); // not sure if this matters
+            let mut intersection_ctx = embree_rs::IntersectContext::coherent(); // not sure if this matters
 
             let mut local_obs = Vec::with_capacity(points.len());
             let mut local_rays = Vec::with_capacity(points.len());
@@ -289,7 +301,7 @@ fn visibility_graph(
                     {
                         // ray pointing from camera towards the point
                         let dir = point - camera.loc;
-                        let mut ray = embree::Ray::new(camera.loc, dir.normalize());
+                        let mut ray = embree_rs::Ray::new(camera.loc, dir.normalize());
 
                         // add rays to batch check
                         ray.tfar = dir.magnitude() - 1e-4;
@@ -300,11 +312,11 @@ fn visibility_graph(
             }
 
             // filter by occluded rays
-            scene
-                .occluded_vec(&mut intersection_ctx, local_rays)
+            scene.occluded_stream_aos(&mut intersection_ctx, &mut local_rays);
+            local_rays
                 .iter()
                 .zip(local_obs)
-                .filter(|x| !*x.0)
+                .filter(|x| !x.0.tfar.is_infinite())
                 .map(|x| x.1)
                 .collect()
         })
@@ -423,27 +435,27 @@ fn main() -> Result<(), std::io::Error> {
     let models = normalize(&models_);
 
     // create embree device
-    let dev = embree::Device::new();
+    let dev = embree_rs::Device::new();
 
     let meshes = models
         .iter()
         .map(|model| add_model(model, &dev))
         .collect::<Vec<_>>();
 
-    let mut scene = embree::Scene::new(&dev);
-    for mesh in meshes.iter() {
+    let mut scene = embree_rs::Scene::new(&dev);
+    for mesh in meshes.into_iter() {
         scene.attach_geometry(mesh);
     }
 
-    scene.commit();
+    let cscene = scene.commit();
 
-    let cameras = generate_cameras_grid(&scene, opt.num_cameras);
+    let cameras = generate_cameras_grid(&cscene, opt.num_cameras);
     println!("Generated {} cameras", cameras.len());
 
     let points = generate_world_points_poisson(&models, opt.num_world_points);
     println!("Generated {} world points", points.len());
 
-    let vis_graph = visibility_graph(&scene, &cameras, &points);
+    let vis_graph = visibility_graph(&cscene, &cameras, &points);
     println!(
         "Computed visibility graph with {} edges",
         vis_graph.iter().map(|x| x.len()).sum::<usize>()
