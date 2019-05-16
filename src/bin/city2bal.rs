@@ -113,7 +113,7 @@ fn generate_cameras_grid(scene: &embree_rs::CommittedScene, num_points: usize) -
         1.0,
         poisson::Type::Normal,
     )
-    .build(rand::thread_rng(), poisson::algorithm::Bridson);
+    .build(rand::thread_rng(), poisson::algorithm::Ebeida);
     let samples = poisson.generate();
 
     let bounds = scene.bounds();
