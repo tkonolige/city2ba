@@ -1,12 +1,12 @@
 extern crate cgmath;
 extern crate nom;
-extern crate rayon;
 extern crate petgraph;
+extern crate rayon;
 
 use cgmath::{ElementWise, InnerSpace, Vector3};
 use nom::*;
-use rayon::prelude::*;
 use petgraph::visit::EdgeRef;
+use rayon::prelude::*;
 
 use std::fs::File;
 use std::io::prelude::*;
@@ -17,7 +17,7 @@ use std::str::FromStr;
 #[derive(Debug)]
 pub enum Error {
     ParseError,
-    IOError(std::io::Error)
+    IOError(std::io::Error),
 }
 
 impl From<std::io::Error> for Error {
@@ -35,7 +35,7 @@ impl<I> From<nom::Err<I>> for Error {
 #[derive(Debug, Clone)]
 pub struct Camera {
     pub loc: Vector3<f32>,
-    pub dir: Vector3<f32>, // Rodriguez
+    pub dir: Vector3<f32>,    // Rodriguez
     pub intrin: Vector3<f32>, // Rodriguez
     pub img_size: (usize, usize),
 }
@@ -73,7 +73,6 @@ impl Camera {
     pub fn distortion(&self) -> (f32, f32) {
         (self.intrin[1], self.intrin[2])
     }
-
 }
 
 pub fn total_reprojection_error(
@@ -216,12 +215,15 @@ impl BALProblem {
         let mut file = File::open(filepath)?;
         let mut contents = Vec::new();
         file.read_to_end(&mut contents)?;
-        bal_problem(contents.as_slice()).map(|x| x.1).map_err(Error::from)
+        bal_problem(contents.as_slice())
+            .map(|x| x.1)
+            .map_err(Error::from)
     }
 
     /// Get the largest connected component of cameras and points.
     pub fn largest_connected_component(&self) -> Self {
-        let num_edges = self.vis_graph
+        let num_edges = self
+            .vis_graph
             .iter()
             .map(|adj| adj.iter().map(|x| x.0).sum::<usize>())
             .sum();
@@ -278,7 +280,11 @@ impl BALProblem {
             ));
         }
 
-        BALProblem{cameras:new_cameras, points:new_points, vis_graph:adj}
+        BALProblem {
+            cameras: new_cameras,
+            points: new_points,
+            vis_graph: adj,
+        }
     }
 
     pub fn write(&self, path: &std::path::Path) -> Result<(), std::io::Error> {

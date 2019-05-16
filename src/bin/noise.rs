@@ -2,7 +2,8 @@ extern crate structopt;
 use structopt::StructOpt;
 
 extern crate rand;
-use rand::distributions::{Distribution, Normal};
+use rand::distributions::{Distribution, Normal, WeightedIndex};
+use rand::Rng;
 
 extern crate city2bal;
 use city2bal::*;
@@ -113,39 +114,94 @@ fn add_noise(
     let n_observations = Normal::new(0.0, observations_std.into());
     let bal_std = bal.std().magnitude();
 
-    let cameras = bal.cameras.iter().map(|c| {
-        let dir = c.dir + unit_random() * n_rotation.sample(&mut rand::thread_rng()) as f32;
-        let loc =
-            c.loc + unit_random() * bal_std * n_translation.sample(&mut rand::thread_rng()) as f32;
-        let intrin = c.intrin + unit_random() * n_intrinsics.sample(&mut rand::thread_rng()) as f32;
-        Camera {
-            dir: dir,
-            loc: loc,
-            intrin: intrin,
-            img_size: c.img_size,
-        }
-    }).collect();
+    let cameras = bal
+        .cameras
+        .iter()
+        .map(|c| {
+            let dir = c.dir + unit_random() * n_rotation.sample(&mut rand::thread_rng()) as f32;
+            let loc = c.loc
+                + unit_random() * bal_std * n_translation.sample(&mut rand::thread_rng()) as f32;
+            let intrin =
+                c.intrin + unit_random() * n_intrinsics.sample(&mut rand::thread_rng()) as f32;
+            Camera {
+                dir: dir,
+                loc: loc,
+                intrin: intrin,
+                img_size: c.img_size,
+            }
+        })
+        .collect();
 
     let points = bal
         .points
         .iter()
-        .map(|p| p + unit_random() * n_point.sample(&mut rand::thread_rng()) as f32).collect();
+        .map(|p| p + unit_random() * n_point.sample(&mut rand::thread_rng()) as f32)
+        .collect();
 
-    let observations = bal.vis_graph.iter().map(|obs| {
-        obs.iter().map(|(i, (x, y))| {
-            // random direction
-            let n = Normal::new(0.0, 1.0);
-            let nx = n.sample(&mut rand::thread_rng()) as f32;
-            let ny = n.sample(&mut rand::thread_rng()) as f32;
-            let m = (nx.powf(2.0) + ny.powf(2.0)).sqrt();
-            let r = n_observations.sample(&mut rand::thread_rng()) as f32;
-            let x_ = x + nx / m * r;
-            let y_ = y + ny / m * r;
-            (i.clone(), (x_, y_))
-        }).collect::<Vec<(usize, (f32, f32))>>()
-    }).collect();
+    let observations = bal
+        .vis_graph
+        .iter()
+        .map(|obs| {
+            obs.iter()
+                .map(|(i, (x, y))| {
+                    // random direction
+                    let n = Normal::new(0.0, 1.0);
+                    let nx = n.sample(&mut rand::thread_rng()) as f32;
+                    let ny = n.sample(&mut rand::thread_rng()) as f32;
+                    let m = (nx.powf(2.0) + ny.powf(2.0)).sqrt();
+                    let r = n_observations.sample(&mut rand::thread_rng()) as f32;
+                    let x_ = x + nx / m * r;
+                    let y_ = y + ny / m * r;
+                    (i.clone(), (x_, y_))
+                })
+                .collect::<Vec<(usize, (f32, f32))>>()
+        })
+        .collect();
 
-    BALProblem{cameras:cameras, points:points, vis_graph:observations}
+    BALProblem {
+        cameras: cameras,
+        points: points,
+        vis_graph: observations,
+    }
+}
+
+/// Add incorrect correspondences by swapping two nearby observations.
+fn add_incorrect_correspondences(bal: BALProblem, mismatch_chance: f32) -> BALProblem {
+    let observations = bal
+        .vis_graph
+        .into_iter()
+        .map(|mut obs| {
+            let mut rng = rand::thread_rng();
+            for i in 0..obs.len() {
+                // Check if we should swap this entry
+                if rng.gen_range(0.0, 1.0) <= mismatch_chance {
+                    // distance from this observation to all others
+                    let mut dists = obs
+                        .iter()
+                        .map(|(_, (x, y))| {
+                            (((obs[i].1).0 - x).powf(2.0) + ((obs[i].1).1 - y).powf(2.0)).sqrt()
+                        })
+                        .collect::<Vec<_>>();
+                    // TODO: use max?
+                    dists[i] = 10000000000.0;
+                    let weights = dists.iter().map(|x| 1.0 / x).collect::<Vec<_>>();
+                    let j = WeightedIndex::new(weights).unwrap().sample(&mut rng);
+
+                    // swap feature indices
+                    let tmp = obs[i].0;
+                    obs[i].0 = obs[j].0;
+                    obs[j].0 = tmp;
+                }
+            }
+            obs
+        })
+        .collect();
+
+    BALProblem {
+        cameras: bal.cameras,
+        points: bal.points,
+        vis_graph: observations,
+    }
 }
 
 fn main() -> Result<(), Error> {
@@ -154,7 +210,15 @@ fn main() -> Result<(), Error> {
     let mut bal = BALProblem::from_file(&opt.input)?;
 
     bal = add_drift(bal, opt.drift_strength, opt.drift_std);
-    bal = add_noise(bal, opt.translation_std, opt.rotation_std, opt.intrinsic_std, opt.point_std, opt.observation_std);
+    bal = add_noise(
+        bal,
+        opt.translation_std,
+        opt.rotation_std,
+        opt.intrinsic_std,
+        opt.point_std,
+        opt.observation_std,
+    );
+    bal = add_incorrect_correspondences(bal, opt.mismatch_chance);
 
     bal.write(&opt.output).map_err(Error::from)
 }

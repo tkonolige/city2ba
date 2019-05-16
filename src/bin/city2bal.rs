@@ -1,5 +1,6 @@
 extern crate cgmath;
 extern crate embree_rs;
+extern crate indicatif;
 extern crate itertools;
 extern crate nalgebra as na;
 extern crate ply_rs;
@@ -7,7 +8,6 @@ extern crate poisson;
 extern crate rand;
 extern crate rayon;
 extern crate structopt;
-extern crate indicatif;
 extern crate tobj;
 
 use itertools::Itertools;
@@ -21,9 +21,9 @@ use ply_rs::ply::{
 };
 use ply_rs::writer::Writer;
 
+use std::convert::TryInto;
 use std::fs::File;
 use std::io::BufWriter;
-use std::convert::TryInto;
 
 use cgmath::prelude::*;
 use cgmath::{ElementWise, InnerSpace, Vector3, Vector4};
@@ -32,7 +32,6 @@ use rayon::prelude::*;
 
 extern crate city2bal;
 use city2bal::*;
-
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "basic")]
@@ -225,61 +224,21 @@ fn generate_world_points_poisson(
     points
 }
 
-/*
-fn generate_world_points(
-    scene: &embree_rs::Scene,
-    cameras: &Vec<CameraPose>,
-    num_points: usize,
-) -> Vec<Vector3<f32>> {
-    let img_size = (1024, 1024);
-
-    let mut points = Vec::new();
-    let mut intersection_ctx = embree_rs::IntersectContext::incoherent(); // not sure if this matters
-
-    for camera in cameras {
-        let cam = Camera::look_dir(
-            camera.loc,
-            camera.dir,
-            Vector3::new(0.0, 1.0, 0.0),
-            75.0,
-            img_size,
-        );
-
-        let poisson = poisson::Builder::<f32, na::Vector2<f32>>::with_samples(
-            num_points / cameras.len() * 2, // x2 seems to get us closer to the desired amount
-            1.0,
-            poisson::Type::Normal,
-        ).build(rand::thread_rng(), poisson::algorithm::Bridson);
-        let samples = poisson.generate();
-
-        for sample in samples {
-            let dir = cam.ray_dir((sample[0] * img_size.0 as f32, sample[1] * img_size.0 as f32));
-            let mut ray = embree_rs::Ray::new(camera.loc, dir);
-            ray.tnear = 0.001; // TODO: what to use here?
-            let ray_hit = scene.intersect(&mut intersection_ctx, ray);
-            if ray_hit.hit.hit() {
-                points.push(camera.loc + ray_hit.ray.tfar * dir);
-            }
-        }
-    }
-
-    points
-}
-*/
-
 fn visibility_graph(
     scene: &embree_rs::CommittedScene,
     cameras: &Vec<Camera>,
     points: &Vec<Vector3<f32>>,
 ) -> Vec<Vec<(usize, (f32, f32))>> {
-
     let pb = ProgressBar::new(cameras.len().try_into().unwrap());
-    pb.set_style(ProgressStyle::default_bar()
-                 .template("[{bar:40}] {pos}/{len} ({eta})")
-                 .progress_chars("#-"));
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("[{bar:40}] {pos}/{len} ({eta})")
+            .progress_chars("#-"),
+    );
 
     cameras
-        .par_iter().progress_with(pb)
+        .par_iter()
+        .progress_with(pb)
         .map(|camera| {
             let mut intersection_ctx = embree_rs::IntersectContext::coherent(); // not sure if this matters
 
