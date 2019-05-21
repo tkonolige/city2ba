@@ -45,7 +45,7 @@ struct Opt {
     #[structopt(long = "points", default_value = "1000")]
     num_world_points: usize,
 
-    #[structopt(long = "max-dist", default_value = "10")]
+    #[structopt(long = "max-dist", default_value = "100")]
     max_dist: f32,
 
     #[structopt(long = "ply", parse(from_os_str))]
