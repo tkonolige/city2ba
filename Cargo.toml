@@ -19,3 +19,4 @@ petgraph = "*"
 rayon = "*"
 nom = "*"
 indicatif = {git = "https://github.com/mitsuhiko/indicatif.git", features=["with_rayon"]}
+disjoint-sets = "*"

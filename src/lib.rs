@@ -1,7 +1,9 @@
 extern crate cgmath;
+extern crate disjoint_sets;
 extern crate nom;
 extern crate petgraph;
 extern crate rayon;
+extern crate itertools;
 
 use cgmath::{ElementWise, InnerSpace, Vector3};
 use nom::*;
@@ -13,6 +15,12 @@ use std::io::prelude::*;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 use std::str::FromStr;
+use std::collections::HashMap;
+use std::iter::FromIterator;
+
+use disjoint_sets::*;
+
+use itertools::Itertools;
 
 #[derive(Debug)]
 pub enum Error {
@@ -220,70 +228,80 @@ impl BALProblem {
             .map_err(Error::from)
     }
 
+    pub fn num_points(&self) -> usize {
+        self.points.len()
+    }
+
+    pub fn num_cameras(&self) -> usize {
+        self.cameras.len()
+    }
+
     /// Get the largest connected component of cameras and points.
     pub fn largest_connected_component(&self) -> Self {
-        let num_edges = self
-            .vis_graph
-            .iter()
-            .map(|adj| adj.iter().map(|x| x.0).sum::<usize>())
-            .sum();
-        let num_cameras = self.vis_graph.len();
-        let mut g = petgraph::Graph::<bool, _, petgraph::Undirected, usize>::with_capacity(
-            num_cameras,
-            num_edges,
-        );
-        for (i, adj) in self.vis_graph.iter().enumerate() {
-            g.extend_with_edges(adj.iter().map(|o| (i, o.0 + num_cameras, o.1)));
-        }
+        let mut uf = UnionFind::new(self.num_points() + self.num_cameras());
 
-        let cc = petgraph::algo::tarjan_scc(&g);
-        let largest = cc.iter().max_by_key(|&v| v.len()).unwrap();
-
-        let mut node_id_map = vec![None; g.node_count()];
-        let num_cameras_left = largest.iter().filter(|i| i.index() < num_cameras).count();
-        let mut camera_count = 0;
-        let mut point_count = 0;
-        let mut new_points = Vec::new();
-        let mut new_cameras = Vec::new();
-
-        for node_id in largest {
-            if node_id.index() >= num_cameras {
-                // is a point
-                node_id_map[node_id.index()] = Some(num_cameras_left + point_count);
-                new_points.push(self.points[node_id.index() - num_cameras]);
-                point_count += 1;
-            } else {
-                // is a camera
-                node_id_map[node_id.index()] = Some(camera_count);
-                new_cameras.push(self.cameras[node_id.index()].clone());
-                camera_count += 1;
+        // point index is num_cameras + point id
+        for (i, obs) in self.vis_graph.iter().enumerate() {
+            for (j, _) in obs {
+                let p = j + self.num_cameras();
+                if !uf.equiv(i, p) {
+                    uf.union(i, p);
+                }
             }
         }
 
-        // store node ids in the weight of the node
-        let lcc = g.filter_map(
-            |node_id, _| node_id_map[node_id.index()],
-            |_, edge| Some(edge),
-        );
+        let sets = uf.to_vec();
 
-        let mut adj = vec![Vec::new(); num_cameras_left];
-        for edge in lcc.edge_references() {
-            let (c, p) = if edge.source().index() < num_cameras_left {
-                (edge.source(), edge.target())
-            } else {
-                (edge.target(), edge.source())
-            };
-
-            adj[*lcc.node_weight(c).unwrap()].push((
-                lcc.node_weight(p).unwrap() - num_cameras_left,
-                **edge.weight(),
-            ));
+        // find largest set
+        let mut hm = HashMap::new();
+        for i in 0..self.num_cameras() {
+            let x = hm.entry(sets[i]).or_insert(0);
+            *x += 1;
         }
+        let lcc_id = *(hm.iter().sorted_by(|a, b| Ord::cmp(&b.1, &a.1)).next().unwrap().0);
+
+        // compute component
+        // new cameras and points
+        let cameras = self
+            .cameras
+            .iter()
+            .zip(sets.iter())
+            .filter(|x| *x.1 == lcc_id)
+            .map(|x| x.0.clone())
+            .collect::<Vec<_>>();
+        let points = self
+            .points
+            .iter()
+            .zip(sets[self.num_cameras()..].iter())
+            .filter(|x| *x.1 == lcc_id)
+            .map(|x| x.0.clone())
+            .collect::<Vec<_>>();
+
+        // map from old id to new
+        let point_ids = sets[self.num_cameras()..(self.num_cameras() + self.num_points())]
+            .iter()
+            .enumerate()
+            .filter(|x| *x.1 == lcc_id)
+            .map(|x| x.0);
+        let point_map = HashMap::<usize, usize>::from_iter(point_ids.enumerate().map(|(x, y)| (y, x)));
+        // new camera id is implicitly handled by filtering
+        let vis_graph = self
+            .vis_graph
+            .iter()
+            .enumerate()
+            .filter(|x| sets[x.0] == lcc_id)
+            .map(|(_, obs)| {
+                obs.into_iter()
+                    .filter(|x| sets[x.0] == lcc_id)
+                    .map(|(i, p)| (point_map[&i], p.clone()))
+                    .collect()
+            })
+            .collect();
 
         BALProblem {
-            cameras: new_cameras,
-            points: new_points,
-            vis_graph: adj,
+            cameras: cameras,
+            points: points,
+            vis_graph: vis_graph,
         }
     }
 

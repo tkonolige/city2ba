@@ -103,6 +103,7 @@ fn axis_angle_from_quaternion(q: &cgmath::Quaternion<f32>) -> Vector3<f32> {
 // Generate camera locations by placing cameras on a regular grid throughout the image. Locations
 // are then filtered based on their height.
 // TODO: smarter pattern for points. choose initial point and expand search?
+// TODO: keep generating points until we hit the target number
 fn generate_cameras_grid(scene: &embree_rs::CommittedScene, num_points: usize) -> Vec<Camera> {
     let mut intersection_ctx = embree_rs::IntersectContext::coherent(); // not sure if this matters
     let mut positions = Vec::new();
