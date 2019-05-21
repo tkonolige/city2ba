@@ -45,6 +45,9 @@ struct Opt {
     #[structopt(long = "points", default_value = "1000")]
     num_world_points: usize,
 
+    #[structopt(long = "max-dist", default_value = "10")]
+    max_dist: f32,
+
     #[structopt(long = "ply", parse(from_os_str))]
     ply_out: Option<std::path::PathBuf>,
 
@@ -229,6 +232,7 @@ fn visibility_graph(
     scene: &embree_rs::CommittedScene,
     cameras: &Vec<Camera>,
     points: &Vec<Vector3<f32>>,
+    max_dist: f32,
 ) -> Vec<Vec<(usize, (f32, f32))>> {
     let pb = ProgressBar::new(cameras.len().try_into().unwrap());
     pb.set_style(
@@ -248,8 +252,8 @@ fn visibility_graph(
             for (i, point) in points.iter().enumerate() {
                 // project point into camera frame
                 let p_camera = camera.project_world(point);
-                // camera looks down negative z
-                if p_camera.z < 0.0 {
+                // check if point is infront of camera (camera looks down negative z)
+                if p_camera.z < 0.0 && (camera.loc - point).magnitude() < max_dist {
                     // check point is in front of camera
                     let p = camera.project(p_camera);
 
@@ -415,7 +419,8 @@ fn main() -> Result<(), std::io::Error> {
     let points = generate_world_points_poisson(&models, opt.num_world_points);
     println!("Generated {} world points", points.len());
 
-    let vis_graph = visibility_graph(&cscene, &cameras, &points);
+    // TODO: use something more sophisticated to calculate the max distance
+    let vis_graph = visibility_graph(&cscene, &cameras, &points, opt.max_dist);
     println!(
         "Computed visibility graph with {} edges",
         vis_graph.iter().map(|x| x.len()).sum::<usize>()
