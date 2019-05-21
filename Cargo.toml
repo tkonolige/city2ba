@@ -15,7 +15,6 @@ nalgebra = "0.17"
 itertools = "*"
 embree-rs = {git = "https://github.com/tkonolige/embree-rs.git"}
 # embree-rs = {path = "/Users/tristan/Sync/Research/bundle_adjustment/embree-rs"}
-petgraph = "*"
 rayon = "*"
 nom = "*"
 indicatif = {git = "https://github.com/mitsuhiko/indicatif.git", features=["with_rayon"]}

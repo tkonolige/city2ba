@@ -1,13 +1,11 @@
 extern crate cgmath;
 extern crate disjoint_sets;
 extern crate nom;
-extern crate petgraph;
 extern crate rayon;
 extern crate itertools;
 
 use cgmath::{ElementWise, InnerSpace, Vector3};
 use nom::*;
-use petgraph::visit::EdgeRef;
 use rayon::prelude::*;
 
 use std::fs::File;
