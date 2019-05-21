@@ -237,7 +237,7 @@ fn visibility_graph(
     let pb = ProgressBar::new(cameras.len().try_into().unwrap());
     pb.set_style(
         ProgressStyle::default_bar()
-            .template("[{bar:40}] {pos}/{len} ({eta})")
+            .template("[{bar:40}] {percent}% ({eta})")
             .progress_chars("#-"),
     );
 
