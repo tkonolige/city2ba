@@ -46,7 +46,7 @@ struct Opt {
     num_world_points: usize,
 
     #[structopt(long = "max-dist", default_value = "100")]
-    max_dist: f32,
+    max_dist: f64,
 
     #[structopt(long = "ply", parse(from_os_str))]
     ply_out: Option<std::path::PathBuf>,
@@ -86,7 +86,7 @@ fn add_model<'a>(model: &tobj::Model, dev: &'a embree_rs::Device) -> embree_rs::
     geo
 }
 
-fn axis_angle_from_quaternion(q: &cgmath::Quaternion<f32>) -> Vector3<f32> {
+fn axis_angle_from_quaternion(q: &cgmath::Quaternion<f64>) -> Vector3<f64> {
     let q1 = q[1];
     let q2 = q[2];
     let q3 = q[3];
@@ -95,9 +95,9 @@ fn axis_angle_from_quaternion(q: &cgmath::Quaternion<f32>) -> Vector3<f32> {
     let cos_theta = q[0];
     let two_theta = 2.0
         * (if cos_theta < 0.0 {
-            f32::atan2(-sin_theta, -cos_theta)
+            f64::atan2(-sin_theta, -cos_theta)
         } else {
-            f32::atan2(sin_theta, cos_theta)
+            f64::atan2(sin_theta, cos_theta)
         });
     let k = two_theta / sin_theta;
     Vector3::new(q1 * k, q2 * k, q3 * k)
@@ -111,7 +111,7 @@ fn generate_cameras_grid(scene: &embree_rs::CommittedScene, num_points: usize) -
     let mut intersection_ctx = embree_rs::IntersectContext::coherent(); // not sure if this matters
     let mut positions = Vec::new();
 
-    let poisson = poisson::Builder::<f32, na::Vector2<f32>>::with_samples(
+    let poisson = poisson::Builder::<f64, na::Vector2<f64>>::with_samples(
         num_points * 2, // x2 seems to get us closer to the desired amount
         1.0,
         poisson::Type::Normal,
@@ -121,22 +121,22 @@ fn generate_cameras_grid(scene: &embree_rs::CommittedScene, num_points: usize) -
 
     let bounds = scene.bounds();
     // add a little wiggle room
-    let start = Vector3::new(bounds.upper_x, bounds.upper_y, bounds.upper_z + 0.1);
+    let start = Vector3::new(bounds.upper_x as f64, bounds.upper_y as f64, bounds.upper_z as f64 + 0.1);
     let delta = Vector3::new(
-        bounds.upper_x - bounds.lower_x,
-        bounds.upper_y - bounds.lower_y,
+        (bounds.upper_x - bounds.lower_x) as f64,
+        (bounds.upper_y - bounds.lower_y) as f64,
         0.0,
     );
 
     for sample in samples {
         let origin = start - delta.mul_element_wise(Vector3::new(sample[0], sample[1], 0.0));
         let direction = Vector3::new(0.0, 0.0, -1.0); // looking directly down
-        let ray = embree_rs::Ray::new(origin, direction);
+        let ray = embree_rs::Ray::new(origin.cast::<f32>().unwrap(), direction.cast::<f32>().unwrap());
         let mut ray_hit = embree_rs::RayHit::new(ray);
         scene.intersect(&mut intersection_ctx, &mut ray_hit);
         if ray_hit.hit.hit() {
             // push point up a little from where it hit
-            let pt = origin + direction * ray_hit.ray.tfar + Vector3::new(0.0, 0.0, 1.0);
+            let pt = origin + direction * (ray_hit.ray.tfar as f64) + Vector3::new(0.0, 0.0, 1.0);
 
             if pt[2] < 10.0 {
                 positions.push(pt);
@@ -149,8 +149,8 @@ fn generate_cameras_grid(scene: &embree_rs::CommittedScene, num_points: usize) -
         .map(|position| {
             // choose a random direction looking at the horizon
             // TODO: check that we are not too close to an object
-            let dir = thread_rng().gen_range(0.0, 2.0 * std::f32::consts::PI);
-            let down_x = cgmath::Quaternion::from_angle_y(cgmath::Rad(std::f32::consts::PI / 2.0));
+            let dir = thread_rng().gen_range(0.0, 2.0 * std::f64::consts::PI);
+            let down_x = cgmath::Quaternion::from_angle_y(cgmath::Rad(std::f64::consts::PI / 2.0));
             let around_z = cgmath::Quaternion::from_angle_z(cgmath::Rad(dir));
             Camera {
                 loc: position,
@@ -164,7 +164,7 @@ fn generate_cameras_grid(scene: &embree_rs::CommittedScene, num_points: usize) -
 
 fn iter_triangles<'a>(
     model: &'a tobj::Model,
-) -> impl Iterator<Item = (Vector3<f32>, Vector3<f32>, Vector3<f32>)> + 'a {
+) -> impl Iterator<Item = (Vector3<f64>, Vector3<f64>, Vector3<f64>)> + 'a {
     model
         .mesh
         .indices
@@ -172,16 +172,16 @@ fn iter_triangles<'a>(
         .map(move |index| {
             let i: usize = *index as usize;
             Vector3::new(
-                model.mesh.positions[i * 3],
-                model.mesh.positions[i * 3 + 1],
-                model.mesh.positions[i * 3 + 2],
+                model.mesh.positions[i * 3] as f64,
+                model.mesh.positions[i * 3 + 1] as f64,
+                model.mesh.positions[i * 3 + 2] as f64,
             )
         })
         .tuples::<(_, _, _)>()
 }
 
 /// Choose a uniformly distributed random point in the given triangle.
-fn random_point_in_triangle(v0: Vector3<f32>, v1: Vector3<f32>, v2: Vector3<f32>) -> Vector3<f32> {
+fn random_point_in_triangle(v0: Vector3<f64>, v1: Vector3<f64>, v2: Vector3<f64>) -> Vector3<f64> {
     let mut rx = thread_rng().gen_range(0.0, 1.0);
     let mut ry = thread_rng().gen_range(0.0, 1.0);
 
@@ -197,14 +197,14 @@ fn random_point_in_triangle(v0: Vector3<f32>, v1: Vector3<f32>, v2: Vector3<f32>
 fn generate_world_points_poisson(
     models: &Vec<tobj::Model>,
     num_points: usize,
-) -> Vec<Vector3<f32>> {
+) -> Vec<Vector3<f64>> {
     // calculate total area
-    let total_area: f32 = models
+    let total_area: f64 = models
         .iter()
         .map(|model| {
             iter_triangles(model)
-                .map(|(v0, v1, v2)| ((v1 - v0).cross(v2 - v0).magnitude() / 2.0) as f32)
-                .sum::<f32>()
+                .map(|(v0, v1, v2)| ((v1 - v0).cross(v2 - v0).magnitude() / 2.0) as f64)
+                .sum::<f64>()
         })
         .sum();
 
@@ -212,8 +212,8 @@ fn generate_world_points_poisson(
 
     for model in models {
         for (v0, v1, v2) in iter_triangles(model) {
-            let area = ((v1 - v0).cross(v2 - v0).magnitude() / 2.0) as f32;
-            let mut num_samples = area / total_area * num_points as f32;
+            let area = ((v1 - v0).cross(v2 - v0).magnitude() / 2.0) as f64;
+            let mut num_samples = area / total_area * num_points as f64;
             // TODO: fix this probability
             while num_samples > 1.0 {
                 points.push(random_point_in_triangle(v0, v1, v2));
@@ -231,9 +231,9 @@ fn generate_world_points_poisson(
 fn visibility_graph(
     scene: &embree_rs::CommittedScene,
     cameras: &Vec<Camera>,
-    points: &Vec<Vector3<f32>>,
-    max_dist: f32,
-) -> Vec<Vec<(usize, (f32, f32))>> {
+    points: &Vec<Vector3<f64>>,
+    max_dist: f64,
+) -> Vec<Vec<(usize, (f64, f64))>> {
     let pb = ProgressBar::new(cameras.len().try_into().unwrap());
     pb.set_style(
         ProgressStyle::default_bar()
@@ -259,16 +259,16 @@ fn visibility_graph(
 
                     // check point is in camera frame
                     if p.x >= 0.0
-                        && p.x < camera.img_size.0 as f32
+                        && p.x < camera.img_size.0 as f64
                         && p.y >= 0.0
-                        && p.y < camera.img_size.1 as f32
+                        && p.y < camera.img_size.1 as f64
                     {
                         // ray pointing from camera towards the point
                         let dir = point - camera.loc;
-                        let mut ray = embree_rs::Ray::new(camera.loc, dir.normalize());
+                        let mut ray = embree_rs::Ray::new(camera.loc.cast::<f32>().unwrap(), dir.normalize().cast::<f32>().unwrap());
 
                         // add rays to batch check
-                        ray.tfar = dir.magnitude() - 1e-4;
+                        ray.tfar = dir.magnitude() as f32 - 1e-4;
                         local_rays.push(ray);
                         local_obs.push((i, (p.x, p.y)));
                     }
@@ -291,7 +291,7 @@ fn visibility_graph(
 fn write_cameras(
     path: &std::path::Path,
     cameras: &Vec<Camera>,
-    points: &Vec<Vector3<f32>>,
+    points: &Vec<Vector3<f64>>,
 ) -> Result<(), std::io::Error> {
     let mut ply = Ply::<DefaultElement>::new();
     let mut point_element = ElementDef::new("vertex".to_string());
@@ -314,9 +314,9 @@ fn write_cameras(
         .iter()
         .map(|camera| {
             let mut point = DefaultElement::new();
-            point.insert("x".to_string(), Property::Float(camera.loc[0]));
-            point.insert("y".to_string(), Property::Float(camera.loc[1]));
-            point.insert("z".to_string(), Property::Float(camera.loc[2]));
+            point.insert("x".to_string(), Property::Float(camera.loc[0] as f32));
+            point.insert("y".to_string(), Property::Float(camera.loc[1] as f32));
+            point.insert("z".to_string(), Property::Float(camera.loc[2] as f32));
             point.insert("red".to_string(), Property::UChar(255));
             point.insert("green".to_string(), Property::UChar(0));
             point.insert("blue".to_string(), Property::UChar(0));
@@ -326,9 +326,9 @@ fn write_cameras(
 
     let pts = points.iter().map(|point| {
         let mut p = DefaultElement::new();
-        p.insert("x".to_string(), Property::Float(point[0]));
-        p.insert("y".to_string(), Property::Float(point[1]));
-        p.insert("z".to_string(), Property::Float(point[2]));
+        p.insert("x".to_string(), Property::Float(point[0] as f32));
+        p.insert("y".to_string(), Property::Float(point[1] as f32));
+        p.insert("z".to_string(), Property::Float(point[2] as f32));
         p.insert("red".to_string(), Property::UChar(0));
         p.insert("green".to_string(), Property::UChar(255));
         p.insert("blue".to_string(), Property::UChar(0));

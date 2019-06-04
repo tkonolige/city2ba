@@ -22,45 +22,45 @@ struct Opt {
     input: std::path::PathBuf,
 
     #[structopt(long = "rotation-std", default_value = "0.0")]
-    rotation_std: f32,
+    rotation_std: f64,
 
     #[structopt(long = "translation-std", default_value = "0.0")]
-    translation_std: f32,
+    translation_std: f64,
 
     #[structopt(long = "point-std", default_value = "0.0")]
-    point_std: f32,
+    point_std: f64,
 
     #[structopt(long = "observation-std", default_value = "0.0")]
-    observation_std: f32,
+    observation_std: f64,
 
     #[structopt(long = "intrinsic-std", default_value = "0.0")]
-    intrinsic_std: f32,
+    intrinsic_std: f64,
 
     #[structopt(long = "drift-std", default_value = "0.0")]
-    drift_std: f32,
+    drift_std: f64,
 
     #[structopt(long = "drift-strength", default_value = "0.0")]
-    drift_strength: f32,
+    drift_strength: f64,
 
     // Probability of a mismatch occurring in a match
     #[structopt(long = "mismatch-chance", default_value = "0.0")]
-    mismatch_chance: f32,
+    mismatch_chance: f64,
 
     #[structopt(name = "OUT", parse(from_os_str))]
     output: std::path::PathBuf,
 }
 
-fn unit_random() -> Vector3<f32> {
+fn unit_random() -> Vector3<f64> {
     let r = Normal::new(0.0, 1.0);
     Vector3::new(
-        r.sample(&mut rand::thread_rng()) as f32,
-        r.sample(&mut rand::thread_rng()) as f32,
-        r.sample(&mut rand::thread_rng()) as f32,
+        r.sample(&mut rand::thread_rng()) as f64,
+        r.sample(&mut rand::thread_rng()) as f64,
+        r.sample(&mut rand::thread_rng()) as f64,
     )
     .normalize()
 }
 
-fn add_drift(bal: BALProblem, strength: f32, std: f32) -> BALProblem {
+fn add_drift(bal: BALProblem, strength: f64, std: f64) -> BALProblem {
     // Choose the drift direction to be in line with the largest standard deviation.
     let dir = bal.std().normalize();
 
@@ -75,9 +75,9 @@ fn add_drift(bal: BALProblem, strength: f32, std: f32) -> BALProblem {
     let r = Normal::new(1.0, std.into());
     let bal_std = bal.std().magnitude();
 
-    let drift_noise = |x: &Vector3<f32>| {
+    let drift_noise = |x: &Vector3<f64>| {
         let distance = (x - origin).magnitude();
-        let v = r.sample(&mut rand::thread_rng()) as f32;
+        let v = r.sample(&mut rand::thread_rng()) as f64;
         x + dir * strength * v * bal_std * distance
     };
     let cameras = bal
@@ -101,11 +101,11 @@ fn add_drift(bal: BALProblem, strength: f32, std: f32) -> BALProblem {
 
 fn add_noise(
     bal: BALProblem,
-    translation_std: f32,
-    rotation_std: f32,
-    intrinsics_std: f32,
-    point_std: f32,
-    observations_std: f32,
+    translation_std: f64,
+    rotation_std: f64,
+    intrinsics_std: f64,
+    point_std: f64,
+    observations_std: f64,
 ) -> BALProblem {
     let n_translation = Normal::new(0.0, translation_std.into());
     let n_rotation = Normal::new(0.0, rotation_std.into());
@@ -118,11 +118,11 @@ fn add_noise(
         .cameras
         .iter()
         .map(|c| {
-            let dir = c.dir + unit_random() * n_rotation.sample(&mut rand::thread_rng()) as f32;
+            let dir = c.dir + unit_random() * n_rotation.sample(&mut rand::thread_rng()) as f64;
             let loc = c.loc
-                + unit_random() * bal_std * n_translation.sample(&mut rand::thread_rng()) as f32;
+                + unit_random() * bal_std * n_translation.sample(&mut rand::thread_rng()) as f64;
             let intrin =
-                c.intrin + unit_random() * n_intrinsics.sample(&mut rand::thread_rng()) as f32;
+                c.intrin + unit_random() * n_intrinsics.sample(&mut rand::thread_rng()) as f64;
             Camera {
                 dir: dir,
                 loc: loc,
@@ -135,7 +135,7 @@ fn add_noise(
     let points = bal
         .points
         .iter()
-        .map(|p| p + unit_random() * n_point.sample(&mut rand::thread_rng()) as f32)
+        .map(|p| p + unit_random() * n_point.sample(&mut rand::thread_rng()) as f64)
         .collect();
 
     let observations = bal
@@ -146,15 +146,15 @@ fn add_noise(
                 .map(|(i, (x, y))| {
                     // random direction
                     let n = Normal::new(0.0, 1.0);
-                    let nx = n.sample(&mut rand::thread_rng()) as f32;
-                    let ny = n.sample(&mut rand::thread_rng()) as f32;
+                    let nx = n.sample(&mut rand::thread_rng()) as f64;
+                    let ny = n.sample(&mut rand::thread_rng()) as f64;
                     let m = (nx.powf(2.0) + ny.powf(2.0)).sqrt();
-                    let r = n_observations.sample(&mut rand::thread_rng()) as f32;
+                    let r = n_observations.sample(&mut rand::thread_rng()) as f64;
                     let x_ = x + nx / m * r;
                     let y_ = y + ny / m * r;
                     (i.clone(), (x_, y_))
                 })
-                .collect::<Vec<(usize, (f32, f32))>>()
+                .collect::<Vec<(usize, (f64, f64))>>()
         })
         .collect();
 
@@ -166,7 +166,7 @@ fn add_noise(
 }
 
 /// Add incorrect correspondences by swapping two nearby observations.
-fn add_incorrect_correspondences(bal: BALProblem, mismatch_chance: f32) -> BALProblem {
+fn add_incorrect_correspondences(bal: BALProblem, mismatch_chance: f64) -> BALProblem {
     let observations = bal
         .vis_graph
         .into_iter()
