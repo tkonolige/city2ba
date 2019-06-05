@@ -209,6 +209,8 @@ fn main() -> Result<(), Error> {
 
     let mut bal = BALProblem::from_file(&opt.input)?;
 
+    println!("Initial error: {:.2e} (L1) {:.2e} (L2)", bal.total_reprojection_error(), bal.total_reprojection_error_l2());
+
     bal = add_drift(bal, opt.drift_strength, opt.drift_std);
     bal = add_noise(
         bal,
@@ -219,6 +221,9 @@ fn main() -> Result<(), Error> {
         opt.observation_std,
     );
     bal = add_incorrect_correspondences(bal, opt.mismatch_chance);
+
+    println!("Final error: {:.2e} (L1) {:.2e} (L2)", bal.total_reprojection_error(), bal.total_reprojection_error_l2());
+
 
     bal.write(&opt.output).map_err(Error::from)
 }

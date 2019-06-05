@@ -184,55 +184,6 @@ impl BALProblem {
         }
     }
 
-    // pub fn from_file(filepath: &Path) -> Result<BALProblem, Error> {
-    //     named!(integer<&[u8], usize>,
-    //            map_res!(map_res!(digit1, std::str::from_utf8), usize::from_str));
-    //
-    //     named!(header<&[u8], (usize, usize, usize)>, ws!(tuple!(integer, integer, integer)));
-    //
-    //     named!(observation<&[u8], (usize, usize, f64, f64)>,
-    //     do_parse!(c_i: integer >>
-    //               space1 >>
-    //               p_i : integer >>
-    //               space1 >>
-    //               obs_x: float >>
-    //               space1 >>
-    //               obs_y: float >>
-    //               ((c_i, p_i, obs_x, obs_y))
-    //               ));
-    //
-    //     fn from_vec(x: Vec<f64>) -> Result<Camera, u8> {
-    //         Ok(Camera::from_vec(x))
-    //     }
-    //
-    //     named!(camera<&[u8], Camera>,
-    //            map_res!(count!(preceded!(space0, float), 9), from_vec));
-    //
-    //     named!(point<&[u8], Vector3<f64> >,
-    //     do_parse!(x: float >>
-    //               space1 >>
-    //               y: float >>
-    //               space1 >>
-    //               z: float >>
-    //               (Vector3::new(x, y, z))
-    //               ));
-    //
-    //     named!(bal_problem<&[u8], BALProblem>,
-    //     do_parse!(hdr: header >>
-    //               obs: count!(preceded!(opt!(tag!("\n")), observation), hdr.2) >>
-    //               cams: count!(dbg_dmp!(preceded!(tag!("\n"), camera)), hdr.0) >>
-    //               pts: dbg_dmp!(count!(preceded!(tag!("\n"), point), hdr.1)) >>
-    //               (BALProblem::new(cams, pts, obs))
-    //           ));
-    //
-    //     let mut file = File::open(filepath)?;
-    //     let mut contents = Vec::new();
-    //     file.read_to_end(&mut contents)?;
-    //     bal_problem(contents.as_slice())
-    //         .map(|x| x.1)
-    //         .map_err(Error::from)
-    // }
-
     pub fn from_file_text(filepath: &Path) -> Result<BALProblem, Error> {
         fn parse_internal(input: &str) -> IResult<&str, BALProblem> {
             fn float(input: &str) -> IResult<&str, f64> {
@@ -283,17 +234,21 @@ impl BALProblem {
         fn parse_internal(input: &[u8]) -> IResult<&[u8], BALProblem> {
             let (input, num_cameras) = be_u64(input)?;
             let (input, num_points) = be_u64(input)?;
-            let (input, num_observations) = be_u64(input)?;
+            let (input, _num_observations) = be_u64(input)?;
 
             let (input, observations) = count(
                 |input| {
-                    let (input, c_i) = be_u64(input)?;
-                    let (input, p_i) = be_u64(input)?;
-                    let (input, obs_x) = be_f64(input)?;
-                    let (input, obs_y) = be_f64(input)?;
-                    Ok((input, (c_i as usize, p_i as usize, obs_x, obs_y)))
+                    let (input, num_obs) = be_u64(input)?;
+                    let (input, obs) = count(
+                        tuple((
+                            nom::combinator::map(be_u64, |x| x as usize),
+                            tuple((be_f64, be_f64)),
+                        )),
+                        num_obs as usize,
+                    )(input)?;
+                    Ok((input, obs))
                 },
-                num_observations as usize,
+                num_cameras as usize,
             )(input)?;
 
             let (input, cameras) = count(
@@ -312,7 +267,14 @@ impl BALProblem {
                 num_points as usize,
             )(input)?;
 
-            Ok((input, BALProblem::new(cameras, points, observations)))
+            Ok((
+                input,
+                BALProblem {
+                    cameras: cameras,
+                    points: points,
+                    vis_graph: observations,
+                },
+            ))
         }
 
         let mut file = File::open(filepath)?;
@@ -460,11 +422,11 @@ impl BALProblem {
         let mut file = BufWriter::new(File::create(path).unwrap());
         file.write_u64::<BigEndian>(self.cameras.len() as u64)?;
         file.write_u64::<BigEndian>(self.points.len() as u64)?;
-        file.write_u64::<BigEndian>(self.vis_graph.iter().map(|x| x.len() as u64).sum::<u64>())?;
+        file.write_u64::<BigEndian>(self.vis_graph.iter().map(|x| x.len()).sum::<usize>() as u64)?;
 
-        for (i, obs) in self.vis_graph.iter().enumerate() {
+        for obs in self.vis_graph.iter() {
+            file.write_u64::<BigEndian>(obs.len() as u64)?;
             for (p, (u, v)) in obs {
-                file.write_u64::<BigEndian>(i as u64)?;
                 file.write_u64::<BigEndian>(*p as u64)?;
                 file.write_f64::<BigEndian>(*u as f64)?;
                 file.write_f64::<BigEndian>(*v as f64)?;
