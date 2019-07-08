@@ -7,6 +7,7 @@ extern crate rayon;
 
 use cgmath::{ElementWise, InnerSpace, Vector3};
 use nom::character::streaming::*;
+use nom::error::VerboseError;
 use nom::multi::count;
 use nom::number::streaming::*;
 use nom::sequence::*;
@@ -29,7 +30,7 @@ use byteorder::*;
 
 #[derive(Debug)]
 pub enum Error {
-    ParseError,
+    ParseError(String),
     IOError(std::io::Error),
 }
 
@@ -39,26 +40,26 @@ impl From<std::io::Error> for Error {
     }
 }
 
-impl<I> From<nom::Err<I>> for Error {
-    fn from(_: nom::Err<I>) -> Self {
-        Error::ParseError
-    }
+fn from_rodrigues<T>(x: Vector3<T>) -> cgmath::Matrix3<T> 
+where T: cgmath::BaseFloat{
+    let angle = cgmath::Rad(x.magnitude());
+    let axis = x.normalize();
+    cgmath::Matrix3::from_axis_angle(axis, angle)
 }
 
+/// Camera expressed as Rx+t with intrinsics
 #[derive(Debug, Clone)]
 pub struct Camera {
-    pub loc: Vector3<f64>,
-    pub dir: Vector3<f64>,    // Rodriguez
-    pub intrin: Vector3<f64>, // Rodriguez
+    pub loc: Vector3<f64>,    // t
+    pub dir: Vector3<f64>,    // Rodriguez R
+    pub intrin: Vector3<f64>, // focal length, radial distortion x2
     pub img_size: (usize, usize),
 }
 
 impl Camera {
     /// Project a point from the world into the camera coordinate system
     pub fn project_world(&self, p: &Vector3<f64>) -> cgmath::Vector3<f64> {
-        let angle = cgmath::Rad(self.dir.magnitude());
-        let axis = self.dir.normalize();
-        cgmath::Matrix3::from_axis_angle(axis, angle) * p + self.loc
+        from_rodrigues(self.dir) * p + self.loc
     }
 
     /// Project a point from camera space into pixel coordinates
@@ -77,6 +78,19 @@ impl Camera {
             intrin: Vector3::new(x[6], x[7], x[8]),
             img_size: (1024, 1024),
         }
+    }
+
+    pub fn from_position_direction(position: Vector3<f64>, dir: Vector3<f64>, intrin: Vector3<f64>, img_size: (usize, usize)) -> Self {
+        Camera {
+            loc: -1.0 * from_rodrigues(dir) * position,
+            dir: dir,
+            intrin: intrin,
+            img_size: img_size,
+        }
+    }
+
+    pub fn center(&self) -> Vector3<f64> {
+        -(from_rodrigues(-self.dir) * self.loc)
     }
 
     pub fn focal_length(&self) -> f64 {
@@ -185,11 +199,8 @@ impl BALProblem {
     }
 
     pub fn from_file_text(filepath: &Path) -> Result<BALProblem, Error> {
-        fn parse_internal(input: &str) -> IResult<&str, BALProblem> {
-            fn float(input: &str) -> IResult<&str, f64> {
-                nom::combinator::map_res(digit1, f64::from_str)(input)
-            }
-            fn unsigned(input: &str) -> IResult<&str, usize> {
+        fn parse_internal(input: &str) -> IResult<&str, BALProblem, VerboseError<&str>> {
+            fn unsigned(input: &str) -> IResult<&str, usize, VerboseError<&str>> {
                 nom::combinator::map_res(digit1, usize::from_str)(input)
             }
 
@@ -204,17 +215,17 @@ impl BALProblem {
                 tuple((
                     preceded(multispace0, unsigned),
                     preceded(multispace0, unsigned),
-                    preceded(multispace0, float),
-                    preceded(multispace0, float),
+                    preceded(multispace0, double),
+                    preceded(multispace0, double),
                 )),
                 num_observations,
             )(input)?;
 
-            let camera = nom::combinator::map(count(preceded(multispace0, float), 9), |x| {
+            let camera = nom::combinator::map(count(preceded(multispace0, double), 9), |x| {
                 Camera::from_vec(x)
             });
             let (input, cameras) = count(camera, num_cameras)(input)?;
-            let point = nom::combinator::map(count(preceded(multispace0, float), 3), |x| {
+            let point = nom::combinator::map(count(preceded(multispace0, double), 3), |x| {
                 Vector3::new(x[0], x[1], x[2])
             });
             let (input, points) = count(point, num_points)(input)?;
@@ -227,11 +238,16 @@ impl BALProblem {
         file.read_to_string(&mut contents)?;
         parse_internal(contents.as_ref())
             .map(|x| x.1)
-            .map_err(Error::from)
+            .map_err(|x| match x {
+                nom::Err::Error(e) | nom::Err::Failure(e) => {
+                    Error::ParseError(nom::error::convert_error(contents.as_ref(), e))
+                }
+                nom::Err::Incomplete(x) => Error::ParseError(format!("{:?}", x)),
+            })
     }
 
     pub fn from_file_binary(filepath: &Path) -> Result<BALProblem, Error> {
-        fn parse_internal(input: &[u8]) -> IResult<&[u8], BALProblem> {
+        fn parse_internal(input: &[u8]) -> IResult<&[u8], BALProblem, VerboseError<&[u8]>> {
             let (input, num_cameras) = be_u64(input)?;
             let (input, num_points) = be_u64(input)?;
             let (input, _num_observations) = be_u64(input)?;
@@ -283,7 +299,12 @@ impl BALProblem {
 
         parse_internal(contents.as_slice())
             .map(|x| x.1)
-            .map_err(Error::from)
+            .map_err(|x| match x {
+                nom::Err::Error(_) | nom::Err::Failure(_) => {
+                    Error::ParseError("Binary parse error".to_string())
+                }
+                nom::Err::Incomplete(x) => Error::ParseError(format!("{:?}", x)),
+            })
     }
 
     pub fn from_file(path: &Path) -> Result<BALProblem, Error> {
@@ -303,6 +324,91 @@ impl BALProblem {
 
     pub fn num_cameras(&self) -> usize {
         self.cameras.len()
+    }
+
+    pub fn verify(&self) {
+        if self.vis_graph.len() > self.num_cameras() {
+            println!(
+                "Have more observations than camears. {} vs {}.",
+                self.vis_graph.len(),
+                self.num_cameras()
+            );
+        }
+        for (i, obs) in self.vis_graph.iter().enumerate() {
+            for (j, _) in obs.iter() {
+                if j >= &self.num_points() {
+                    println!(
+                        "Invalid observation of point {} ({}) from camera {}",
+                        j,
+                        self.num_points(),
+                        i
+                    );
+                }
+            }
+        }
+    }
+
+    pub fn subset(&self, ci: &[usize], pi: &[usize]) -> Self {
+        let cameras = ci
+            .iter()
+            .map(|i| self.cameras[*i].clone())
+            .collect::<Vec<_>>();
+        let points = pi
+            .iter()
+            .map(|i| self.points[*i].clone())
+            .collect::<Vec<_>>();
+
+        // use i64 here so we can mark points that aren't in the final set
+        let mut point_indices: Vec<i64> = vec![-1; self.points.len()];
+        for (i, p) in pi.iter().enumerate() {
+            point_indices[*p] = i as i64;
+        }
+
+        let obs = ci
+            .iter()
+            .map(|i| self.vis_graph[*i].clone())
+            .map(|obs| {
+                obs.iter()
+                    .filter(|(i, _)| point_indices[*i] >= 0)
+                    .map(|(i, uv)| (point_indices[*i] as usize, uv.clone()))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+
+        BALProblem {
+            cameras: cameras,
+            points: points,
+            vis_graph: obs,
+        }
+    }
+
+    pub fn remove_singletons(&self) -> Self {
+        // remove cameras that see less than 4 points
+        let ci = self
+            .vis_graph
+            .iter()
+            .enumerate()
+            .filter(|(_, v)| v.len() > 3)
+            .map(|(i, _)| i)
+            .collect::<Vec<_>>();
+
+        let mut point_count: Vec<i64> = vec![0; self.points.len()];
+        // TODO: skip cameras that we have already removed
+        for obs in self.vis_graph.iter() {
+            for (i, _) in obs.iter() {
+                point_count[*i] += 1;
+            }
+        }
+
+        // remove points seen less than twice
+        let pi = point_count
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| **c > 1)
+            .map(|(i, _)| i)
+            .collect::<Vec<_>>();
+
+        self.subset(ci.as_slice(), pi.as_slice())
     }
 
     /// Get the largest connected component of cameras and points.
@@ -378,6 +484,27 @@ impl BALProblem {
             points: points,
             vis_graph: vis_graph,
         }
+    }
+
+    /// Construct the largest connected component that contains cameras viewing 4 or more points
+    /// and points viewed at least twice.
+    pub fn cull(&self) -> Self {
+        let mut nc = self.num_cameras();
+        let mut np = self.num_points();
+        let mut culled = self.largest_connected_component().remove_singletons();
+        while culled.num_cameras() != nc || culled.num_points() != np {
+            nc = culled.num_cameras();
+            np = culled.num_points();
+            culled = culled.largest_connected_component().remove_singletons();
+        }
+
+        for (i, obs) in culled.vis_graph.iter().enumerate() {
+            if obs.len() < 2 {
+                println!("{} {}", i, obs.len());
+            }
+        }
+
+        culled
     }
 
     pub fn write_text(&self, path: &std::path::Path) -> Result<(), std::io::Error> {

@@ -78,7 +78,8 @@ fn add_drift(bal: BALProblem, strength: f64, std: f64) -> BALProblem {
     let drift_noise = |x: &Vector3<f64>| {
         let distance = (x - origin).magnitude();
         let v = r.sample(&mut rand::thread_rng()) as f64;
-        x + dir * strength * v * bal_std * distance
+        println!("{:?} {:?}", x, dir * strength * v * bal_std * distance);
+        x + dir * strength * v * bal_std * distance * distance
     };
     let cameras = bal
         .cameras
@@ -171,29 +172,36 @@ fn add_incorrect_correspondences(bal: BALProblem, mismatch_chance: f64) -> BALPr
         .vis_graph
         .into_iter()
         .map(|mut obs| {
-            let mut rng = rand::thread_rng();
-            for i in 0..obs.len() {
-                // Check if we should swap this entry
-                if rng.gen_range(0.0, 1.0) <= mismatch_chance {
-                    // distance from this observation to all others
-                    let mut dists = obs
-                        .iter()
-                        .map(|(_, (x, y))| {
-                            (((obs[i].1).0 - x).powf(2.0) + ((obs[i].1).1 - y).powf(2.0)).sqrt()
-                        })
-                        .collect::<Vec<_>>();
-                    // TODO: use max?
-                    dists[i] = 10000000000.0;
-                    let weights = dists.iter().map(|x| 1.0 / x).collect::<Vec<_>>();
-                    let j = WeightedIndex::new(weights).unwrap().sample(&mut rng);
+            if obs.len() > 1 {
+                let mut rng = rand::thread_rng();
+                for i in 0..obs.len() {
+                    // Check if we should swap this entry
+                    if rng.gen_range(0.0, 1.0) <= mismatch_chance {
+                        // distance from this observation to all others
+                        let mut dists = obs
+                            .iter()
+                            .map(|(_, (x, y))| {
+                                (((obs[i].1).0 - x).powf(2.0) + ((obs[i].1).1 - y).powf(2.0)).sqrt()
+                            })
+                            .collect::<Vec<_>>();
+                        // TODO: use max?
+                        dists[i] = 10000000000.0;
+                        let mut weights = dists.iter().map(|x| -x).collect::<Vec<_>>();
+                        weights[i] = 0.0;
+                        let m = weights.iter().fold(1. / 0., |a: f64, b: &f64| a.min(*b));
+                        let weights = weights.iter().map(|x| x - m).collect::<Vec<_>>();
+                        let j = WeightedIndex::new(weights).unwrap().sample(&mut rng);
 
-                    // swap feature indices
-                    let tmp = obs[i].0;
-                    obs[i].0 = obs[j].0;
-                    obs[j].0 = tmp;
+                        // swap feature indices
+                        let tmp = obs[i].0;
+                        obs[i].0 = obs[j].0;
+                        obs[j].0 = tmp;
+                    }
                 }
+                obs
+            } else {
+                obs
             }
-            obs
         })
         .collect();
 
@@ -209,7 +217,11 @@ fn main() -> Result<(), Error> {
 
     let mut bal = BALProblem::from_file(&opt.input)?;
 
-    println!("Initial error: {:.2e} (L1) {:.2e} (L2)", bal.total_reprojection_error(), bal.total_reprojection_error_l2());
+    println!(
+        "Initial error: {:.2e} (L1) {:.2e} (L2)",
+        bal.total_reprojection_error(),
+        bal.total_reprojection_error_l2()
+    );
 
     bal = add_drift(bal, opt.drift_strength, opt.drift_std);
     bal = add_noise(
@@ -222,8 +234,11 @@ fn main() -> Result<(), Error> {
     );
     bal = add_incorrect_correspondences(bal, opt.mismatch_chance);
 
-    println!("Final error: {:.2e} (L1) {:.2e} (L2)", bal.total_reprojection_error(), bal.total_reprojection_error_l2());
-
+    println!(
+        "Final error: {:.2e} (L1) {:.2e} (L2)",
+        bal.total_reprojection_error(),
+        bal.total_reprojection_error_l2()
+    );
 
     bal.write(&opt.output).map_err(Error::from)
 }
