@@ -3,7 +3,9 @@ use structopt::StructOpt;
 
 extern crate rand;
 use rand::distributions::{Distribution, Normal, WeightedIndex};
-use rand::Rng;
+use rand::prelude::*;
+use rand::seq::SliceRandom;
+use rand::{thread_rng, Rng};
 
 extern crate city2bal;
 use city2bal::*;
@@ -13,6 +15,12 @@ use cgmath::*;
 
 extern crate itertools;
 use itertools::Itertools;
+
+extern crate rstar;
+use rstar::RTree;
+
+use std::collections::HashMap;
+use std::iter::FromIterator;
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "noise", about = "Tool to add noise/error to a BAL problem")]
@@ -46,6 +54,18 @@ struct Opt {
     #[structopt(long = "mismatch-chance", default_value = "0.0")]
     mismatch_chance: f64,
 
+    // Percentage of features to keep per camera
+    #[structopt(long = "drop-features", default_value = "1.0")]
+    drop_features: f64,
+
+    // Percentage of landmarks to split in two
+    #[structopt(long = "split-landmarks", default_value = "0.0")]
+    split_landmarks: f64,
+
+    // Percentage of observations that should choose two landmarks to be the same
+    #[structopt(long = "join-landmarks", default_value = "0.0")]
+    join_landmarks: f64,
+
     #[structopt(name = "OUT", parse(from_os_str))]
     output: std::path::PathBuf,
 }
@@ -67,31 +87,32 @@ fn add_drift(bal: BALProblem, strength: f64, std: f64) -> BALProblem {
     let origin = bal
         .cameras
         .iter()
-        .map(|c| &c.loc)
-        .chain(bal.points.iter())
+        .map(|c| c.center())
+        .chain(bal.points.clone().into_iter())
         .fold1(|x, y| if x.magnitude() < y.magnitude() { x } else { y })
         .unwrap();
 
     let r = Normal::new(1.0, std.into());
     let bal_std = bal.std().magnitude();
 
-    let drift_noise = |x: &Vector3<f64>| {
+    let drift_noise = |x: Vector3<f64>| {
         let distance = (x - origin).magnitude();
         let v = r.sample(&mut rand::thread_rng()) as f64;
-        println!("{:?} {:?}", x, dir * strength * v * bal_std * distance);
         x + dir * strength * v * bal_std * distance * distance
     };
     let cameras = bal
         .cameras
         .iter()
         .map(|c| {
-            let mut new_camera = c.clone();
-            new_camera.loc = drift_noise(&c.loc);
-            new_camera
+            c.transform(
+                Vector3::new(0.0, 0.0, 0.0),
+                drift_noise(c.center()),
+                Vector3::new(0.0, 0.0, 0.0),
+            )
         })
         .collect();
 
-    let points = bal.points.iter().map(|p| drift_noise(&p)).collect();
+    let points = bal.points.iter().map(|p| drift_noise(*p)).collect();
 
     BALProblem {
         cameras: cameras,
@@ -115,21 +136,15 @@ fn add_noise(
     let n_observations = Normal::new(0.0, observations_std.into());
     let bal_std = bal.std().magnitude();
 
+    let mut rng = rand::thread_rng();
     let cameras = bal
         .cameras
         .iter()
         .map(|c| {
-            let dir = c.dir + unit_random() * n_rotation.sample(&mut rand::thread_rng()) as f64;
-            let loc = c.loc
-                + unit_random() * bal_std * n_translation.sample(&mut rand::thread_rng()) as f64;
-            let intrin =
-                c.intrin + unit_random() * n_intrinsics.sample(&mut rand::thread_rng()) as f64;
-            Camera {
-                dir: dir,
-                loc: loc,
-                intrin: intrin,
-                img_size: c.img_size,
-            }
+            let dir = unit_random() * n_rotation.sample(&mut rng) as f64;
+            let loc = unit_random() * bal_std * n_translation.sample(&mut rng) as f64;
+            let intrin = unit_random() * n_intrinsics.sample(&mut rng) as f64;
+            c.transform(dir, loc, intrin)
         })
         .collect();
 
@@ -212,6 +227,147 @@ fn add_incorrect_correspondences(bal: BALProblem, mismatch_chance: f64) -> BALPr
     }
 }
 
+fn drop_features(bal: BALProblem, drop_percent: f64) -> BALProblem {
+    let mut rng = thread_rng();
+    let observations = bal
+        .vis_graph
+        .iter()
+        .map(|obs| {
+            let l: usize = (obs.len() as f64 * drop_percent) as usize;
+            let mut o = obs.clone();
+            o.shuffle(&mut rng);
+            o.truncate(l);
+            o
+        })
+        .collect::<Vec<_>>();
+    BALProblem {
+        cameras: bal.cameras,
+        points: bal.points,
+        vis_graph: observations,
+    }
+}
+
+fn split_landmarks(bal: BALProblem, split_percent: f64) -> BALProblem {
+    let mut rng = thread_rng();
+    // select which landmarks to split in two
+    let l = bal.points.len();
+    let n = (split_percent * l as f64) as usize;
+    let inds = (0..l).choose_multiple(&mut rng, n);
+
+    // copy split landmarks
+    let mut points = bal.points.clone();
+    points.extend(inds.iter().map(|i| bal.points[*i]));
+
+    let split_inds: HashMap<usize, usize> = HashMap::from_iter(inds.into_iter().zip(l..(l + n)));
+
+    // modify observations to sometimes view the new landmarks
+    let mut observations = bal.vis_graph;
+    for obs in observations.iter_mut() {
+        for (i, _x) in obs.iter_mut() {
+            if let Some(j) = split_inds.get(i) {
+                // 50% chance to move this observation to the new landmark
+                if rand::random() {
+                    *i = *j;
+                }
+            }
+        }
+    }
+
+    BALProblem {
+        cameras: bal.cameras,
+        points: points,
+        vis_graph: observations,
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+struct IndexedVector3 {
+    id: usize,
+    p: Vector3<f64>,
+}
+
+impl rstar::Point for IndexedVector3 {
+    type Scalar = f64;
+    const DIMENSIONS: usize = 3;
+
+    fn generate(generator: impl Fn(usize) -> Self::Scalar) -> Self {
+        IndexedVector3 {
+            id: usize::max_value(),
+            p: Vector3::new(generator(0), generator(1), generator(2)),
+        }
+    }
+
+    fn nth(&self, index: usize) -> Self::Scalar {
+        match index {
+            0 => self.p.x,
+            1 => self.p.y,
+            2 => self.p.z,
+            _ => unreachable!(),
+        }
+    }
+
+    fn nth_mut(&mut self, _index: usize) -> &mut Self::Scalar {
+        unimplemented!()
+    }
+}
+
+fn join_landmarks(bal: BALProblem, join_percent: f64) -> BALProblem {
+    let observations = {
+        let rtree = RTree::bulk_load(
+            bal.points
+                .iter()
+                .enumerate()
+                .map(|(i, x)| IndexedVector3 {
+                    id: i,
+                    p: x.clone(),
+                })
+                .collect(),
+        );
+
+        let mut rng = thread_rng();
+        let l = bal.points.len();
+        let n = (join_percent * l as f64) as usize;
+        let inds = (0..bal.num_observations()).choose_multiple(&mut rng, n);
+        // convert linear indices into camera, observation indices
+        let obs_inds = inds
+            .iter()
+            .map(|i| {
+                let mut j = 0;
+                let mut c = 0;
+                while bal.vis_graph[c].len() <= (i - j) {
+                    j += bal.vis_graph[c].len();
+                    c += 1;
+                }
+                (c, i - j)
+            })
+            .collect::<Vec<_>>();
+
+        let mut observations = bal.vis_graph;
+        for (c, i) in obs_inds {
+            let pi = observations[c][i].0;
+
+            // TODO: how to choose this constant
+            let neighbor = rtree
+                .nearest_neighbor_iter(&IndexedVector3 {
+                    id: pi,
+                    p: bal.points[pi],
+                })
+                .skip(1)
+                .take(10)
+                .choose(&mut rng)
+                .expect("No neighbors?!");
+            observations[c][i].0 = neighbor.id;
+        }
+        observations
+    };
+
+    BALProblem {
+        cameras: bal.cameras,
+        points: bal.points,
+        vis_graph: observations,
+    }
+}
+
 fn main() -> Result<(), Error> {
     let opt = Opt::from_args();
 
@@ -222,6 +378,22 @@ fn main() -> Result<(), Error> {
         bal.total_reprojection_error(),
         bal.total_reprojection_error_l2()
     );
+
+    if opt.drop_features < 1.0 {
+        bal = drop_features(bal, opt.drop_features);
+        bal = bal.cull();
+    }
+
+    // Join before splitting so that we don't accidentally join two split landmarks
+    if opt.join_landmarks > 0.0 {
+        bal = join_landmarks(bal, opt.split_landmarks);
+        bal = bal.cull();
+    }
+
+    if opt.split_landmarks > 0.0 {
+        bal = split_landmarks(bal, opt.split_landmarks);
+        bal = bal.cull();
+    }
 
     bal = add_drift(bal, opt.drift_strength, opt.drift_std);
     bal = add_noise(

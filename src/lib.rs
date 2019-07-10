@@ -40,8 +40,10 @@ impl From<std::io::Error> for Error {
     }
 }
 
-fn from_rodrigues<T>(x: Vector3<T>) -> cgmath::Matrix3<T> 
-where T: cgmath::BaseFloat{
+fn from_rodrigues<T>(x: Vector3<T>) -> cgmath::Matrix3<T>
+where
+    T: cgmath::BaseFloat,
+{
     let angle = cgmath::Rad(x.magnitude());
     let axis = x.normalize();
     cgmath::Matrix3::from_axis_angle(axis, angle)
@@ -50,9 +52,9 @@ where T: cgmath::BaseFloat{
 /// Camera expressed as Rx+t with intrinsics
 #[derive(Debug, Clone)]
 pub struct Camera {
-    pub loc: Vector3<f64>,    // t
-    pub dir: Vector3<f64>,    // Rodriguez R
-    pub intrin: Vector3<f64>, // focal length, radial distortion x2
+    loc: Vector3<f64>,    // t
+    dir: Vector3<f64>,    // Rodriguez R
+    intrin: Vector3<f64>, // focal length, radial distortion x2
     pub img_size: (usize, usize),
 }
 
@@ -80,7 +82,12 @@ impl Camera {
         }
     }
 
-    pub fn from_position_direction(position: Vector3<f64>, dir: Vector3<f64>, intrin: Vector3<f64>, img_size: (usize, usize)) -> Self {
+    pub fn from_position_direction(
+        position: Vector3<f64>,
+        dir: Vector3<f64>,
+        intrin: Vector3<f64>,
+        img_size: (usize, usize),
+    ) -> Self {
         Camera {
             loc: -1.0 * from_rodrigues(dir) * position,
             dir: dir,
@@ -93,12 +100,31 @@ impl Camera {
         -(from_rodrigues(-self.dir) * self.loc)
     }
 
+    pub fn rotation(&self) -> cgmath::Matrix3<f64> {
+        from_rodrigues(self.dir)
+    }
+
     pub fn focal_length(&self) -> f64 {
         self.intrin[0]
     }
 
     pub fn distortion(&self) -> (f64, f64) {
         (self.intrin[1], self.intrin[2])
+    }
+
+    // TODO: fix dir so it is actually composing rotations
+    pub fn transform(
+        &self,
+        delta_dir: Vector3<f64>,
+        delta_loc: Vector3<f64>,
+        delta_intrin: Vector3<f64>,
+    ) -> Camera {
+        Camera {
+            dir: self.dir + delta_dir,
+            loc: -1.0 * self.rotation() * (self.center() + delta_loc),
+            intrin: self.intrin + delta_intrin,
+            img_size: self.img_size,
+        }
     }
 }
 
@@ -324,6 +350,10 @@ impl BALProblem {
 
     pub fn num_cameras(&self) -> usize {
         self.cameras.len()
+    }
+
+    pub fn num_observations(&self) -> usize {
+        self.vis_graph.iter().map(|x| x.len()).sum()
     }
 
     pub fn verify(&self) {

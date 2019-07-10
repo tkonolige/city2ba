@@ -116,7 +116,11 @@ fn axis_angle_from_quaternion(q: &cgmath::Quaternion<f64>) -> Vector3<f64> {
 // are then filtered based on their height.
 // TODO: smarter pattern for points. choose initial point and expand search?
 // TODO: keep generating points until we hit the target number
-fn generate_cameras_grid(scene: &embree_rs::CommittedScene, num_points: usize, ground: f64) -> Vec<Camera> {
+fn generate_cameras_grid(
+    scene: &embree_rs::CommittedScene,
+    num_points: usize,
+    ground: f64,
+) -> Vec<Camera> {
     let mut intersection_ctx = embree_rs::IntersectContext::coherent(); // not sure if this matters
     let mut positions = Vec::new();
 
@@ -130,7 +134,11 @@ fn generate_cameras_grid(scene: &embree_rs::CommittedScene, num_points: usize, g
 
     let bounds = scene.bounds();
     // add a little wiggle room
-    let start = Vector3::new(bounds.upper_x as f64, bounds.upper_y as f64, bounds.upper_z as f64 + 0.1);
+    let start = Vector3::new(
+        bounds.upper_x as f64,
+        bounds.upper_y as f64,
+        bounds.upper_z as f64 + 0.1,
+    );
     let delta = Vector3::new(
         (bounds.upper_x - bounds.lower_x) as f64,
         (bounds.upper_y - bounds.lower_y) as f64,
@@ -140,7 +148,10 @@ fn generate_cameras_grid(scene: &embree_rs::CommittedScene, num_points: usize, g
     for sample in samples {
         let origin = start - delta.mul_element_wise(Vector3::new(sample[0], sample[1], 0.0));
         let direction = Vector3::new(0.0, 0.0, -1.0); // looking directly down
-        let ray = embree_rs::Ray::new(origin.cast::<f32>().unwrap(), direction.cast::<f32>().unwrap());
+        let ray = embree_rs::Ray::new(
+            origin.cast::<f32>().unwrap(),
+            direction.cast::<f32>().unwrap(),
+        );
         let mut ray_hit = embree_rs::RayHit::new(ray);
         scene.intersect(&mut intersection_ctx, &mut ray_hit);
         if ray_hit.hit.hit() {
@@ -161,9 +172,12 @@ fn generate_cameras_grid(scene: &embree_rs::CommittedScene, num_points: usize, g
             let dir = thread_rng().gen_range(0.0, 2.0 * std::f64::consts::PI);
             let down_x = cgmath::Quaternion::from_angle_y(cgmath::Rad(std::f64::consts::PI / 2.0));
             let around_z = cgmath::Quaternion::from_angle_z(cgmath::Rad(dir));
-            Camera::from_position_direction(position, axis_angle_from_quaternion(&(around_z * down_x)),
-                                            Vector3::new(1.0, 0.0, 0.0),
-                                            (1024, 1024))
+            Camera::from_position_direction(
+                position,
+                axis_angle_from_quaternion(&(around_z * down_x)),
+                Vector3::new(1.0, 0.0, 0.0),
+                (1024, 1024),
+            )
         })
         .collect::<Vec<_>>()
 }
@@ -259,7 +273,7 @@ fn visibility_graph(
                 // project point into camera frame
                 let p_camera = camera.project_world(point);
                 // check if point is infront of camera (camera looks down negative z)
-                if(camera.center() - point).magnitude() < max_dist &&  p_camera.z < 0.0 {
+                if (camera.center() - point).magnitude() < max_dist && p_camera.z < 0.0 {
                     let p = camera.project(p_camera);
 
                     // check point is in camera frame
@@ -270,7 +284,10 @@ fn visibility_graph(
                     {
                         // ray pointing from camera towards the point
                         let dir = point - camera.center();
-                        let mut ray = embree_rs::Ray::new(camera.center().cast::<f32>().unwrap(), dir.normalize().cast::<f32>().unwrap());
+                        let mut ray = embree_rs::Ray::new(
+                            camera.center().cast::<f32>().unwrap(),
+                            dir.normalize().cast::<f32>().unwrap(),
+                        );
 
                         // add rays to batch check
                         ray.tfar = dir.magnitude() as f32 - 1e-4;
@@ -440,11 +457,10 @@ fn main() -> Result<(), std::io::Error> {
         vis_graph: vis_graph,
     };
 
-    let bal_lcc = if !opt.no_lcc {
-        bal.cull()
-    } else {
-        bal
-    };
+    // TODO: sort cameras, points by xy location to have a less random matrix?
+
+    // Remove cameras that view too few points and points that are viewed by too few cameras.
+    let bal_lcc = if !opt.no_lcc { bal.cull() } else { bal };
     println!(
         "Computed LCC with {} cameras, {} points, {} edges",
         bal_lcc.cameras.len(),
