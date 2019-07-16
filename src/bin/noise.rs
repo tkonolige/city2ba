@@ -89,30 +89,30 @@ fn add_drift(bal: BALProblem, strength: f64, std: f64) -> BALProblem {
         .iter()
         .map(|c| c.center())
         .chain(bal.points.clone().into_iter())
-        .fold1(|x, y| if x.magnitude() < y.magnitude() { x } else { y })
+        .fold1(|x, y| if x.distance(EuclideanSpace::origin()) < y.distance(EuclideanSpace::origin()) { x } else { y })
         .unwrap();
 
     let r = Normal::new(1.0, std.into());
     let bal_std = bal.std().magnitude();
 
-    let drift_noise = |x: Vector3<f64>| {
+    let drift_noise = |x: Point3<f64>| {
         let distance = (x - origin).magnitude();
         let v = r.sample(&mut rand::thread_rng()) as f64;
-        x + dir * strength * v * bal_std * distance * distance
+        dir * strength * v * bal_std * distance * distance
     };
     let cameras = bal
         .cameras
         .iter()
         .map(|c| {
             c.transform(
-                Vector3::new(0.0, 0.0, 0.0),
+                Basis3::from_angle_x(Rad(0.0)),
                 drift_noise(c.center()),
                 Vector3::new(0.0, 0.0, 0.0),
             )
         })
         .collect();
 
-    let points = bal.points.iter().map(|p| drift_noise(*p)).collect();
+    let points = bal.points.iter().map(|p| p + drift_noise(*p)).collect();
 
     BALProblem {
         cameras: cameras,
@@ -141,7 +141,7 @@ fn add_noise(
         .cameras
         .iter()
         .map(|c| {
-            let dir = unit_random() * n_rotation.sample(&mut rng) as f64;
+            let dir = Basis3::from_axis_angle(unit_random(), Rad(n_rotation.sample(&mut rng)));
             let loc = unit_random() * bal_std * n_translation.sample(&mut rng) as f64;
             let intrin = unit_random() * n_intrinsics.sample(&mut rng) as f64;
             c.transform(dir, loc, intrin)
@@ -283,7 +283,7 @@ fn split_landmarks(bal: BALProblem, split_percent: f64) -> BALProblem {
 #[derive(Debug, PartialEq, Clone, Copy)]
 struct IndexedVector3 {
     id: usize,
-    p: Vector3<f64>,
+    p: Point3<f64>,
 }
 
 impl rstar::Point for IndexedVector3 {
@@ -293,7 +293,7 @@ impl rstar::Point for IndexedVector3 {
     fn generate(generator: impl Fn(usize) -> Self::Scalar) -> Self {
         IndexedVector3 {
             id: usize::max_value(),
-            p: Vector3::new(generator(0), generator(1), generator(2)),
+            p: Point3::new(generator(0), generator(1), generator(2)),
         }
     }
 

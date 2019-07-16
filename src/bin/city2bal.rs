@@ -12,6 +12,7 @@ extern crate tobj;
 
 use itertools::Itertools;
 use rand::{thread_rng, Rng};
+use rand::distributions::Distribution;
 use structopt::StructOpt;
 
 use indicatif::{ParallelProgressIterator, ProgressBar, ProgressStyle};
@@ -26,7 +27,7 @@ use std::fs::File;
 use std::io::BufWriter;
 
 use cgmath::prelude::*;
-use cgmath::{ElementWise, InnerSpace, Vector3, Vector4};
+use cgmath::{ElementWise, InnerSpace, Vector3, Vector4, Point3, Basis3};
 
 use rayon::prelude::*;
 
@@ -62,6 +63,9 @@ struct Opt {
 
     #[structopt(name = "OUT", parse(from_os_str))]
     bal_out: std::path::PathBuf,
+
+    #[structopt(long = "path")]
+    path: Option<String>,
 }
 
 fn add_model<'a>(model: &tobj::Model, dev: &'a embree_rs::Device) -> embree_rs::Geometry<'a> {
@@ -95,21 +99,48 @@ fn add_model<'a>(model: &tobj::Model, dev: &'a embree_rs::Device) -> embree_rs::
     geo
 }
 
-fn axis_angle_from_quaternion(q: &cgmath::Quaternion<f64>) -> Vector3<f64> {
-    let q1 = q[1];
-    let q2 = q[2];
-    let q3 = q[3];
+/// Generate cameras along a path. Cameras will be pointed along the direction of movement of the
+/// path.
+fn generate_cameras_path(
+    _scene: &embree_rs::CommittedScene,
+    path: &tobj::Model,
+    num_cameras: usize,
+) -> Vec<Camera> {
+    let vertices = path
+        .mesh
+        .positions
+        .iter()
+        .tuples()
+        .map(|(x, y, z)| Point3::new(*x as f64, *y as f64, *z as f64))
+        .collect::<Vec<_>>();
+    let paths = path
+        .mesh
+        .indices
+        .iter()
+        .tuples()
+        .map(|(i, j)| (vertices[*i as usize], vertices[*j as usize]))
+        .collect::<Vec<_>>();
+    let path_lengths = paths.iter().map(|(x, y)| (y - x).magnitude());
 
-    let sin_theta = (q1 * q1 + q2 * q2 + q3 * q3).sqrt();
-    let cos_theta = q[0];
-    let two_theta = 2.0
-        * (if cos_theta < 0.0 {
-            f64::atan2(-sin_theta, -cos_theta)
-        } else {
-            f64::atan2(sin_theta, cos_theta)
-        });
-    let k = two_theta / sin_theta;
-    Vector3::new(q1 * k, q2 * k, q3 * k)
+    let mut rng = rand::thread_rng();
+    let dist = rand::distributions::WeightedIndex::new(path_lengths).unwrap();
+
+    dist.sample_iter(&mut rng)
+        .take(num_cameras)
+        .map(|i| {
+            let (x, y) = paths[i];
+            let d = thread_rng().gen_range(0.0, 1.0);
+            let dir = y - x;
+
+            let pos = x + d * dir;
+
+            Camera::from_position_direction(
+                pos,
+                Basis3::between_vectors(dir.normalize(), Vector3::new(0.0, 0.0, -1.0)),
+                Vector3::new(1.0, 0.0, 0.0),
+            )
+        })
+        .collect()
 }
 
 // Generate camera locations by placing cameras on a regular grid throughout the image. Locations
@@ -134,7 +165,7 @@ fn generate_cameras_grid(
 
     let bounds = scene.bounds();
     // add a little wiggle room
-    let start = Vector3::new(
+    let start = Point3::new(
         bounds.upper_x as f64,
         bounds.upper_y as f64,
         bounds.upper_z as f64 + 0.1,
@@ -147,16 +178,16 @@ fn generate_cameras_grid(
 
     for sample in samples {
         let origin = start - delta.mul_element_wise(Vector3::new(sample[0], sample[1], 0.0));
-        let direction = Vector3::new(0.0, 0.0, -1.0); // looking directly down
+        let direction = Vector3::new(0.0, -1.0, 0.0); // looking directly down
         let ray = embree_rs::Ray::new(
-            origin.cast::<f32>().unwrap(),
+            origin.cast::<f32>().unwrap().to_vec(),
             direction.cast::<f32>().unwrap(),
         );
         let mut ray_hit = embree_rs::RayHit::new(ray);
         scene.intersect(&mut intersection_ctx, &mut ray_hit);
         if ray_hit.hit.hit() {
             // push point up a little from where it hit
-            let pt = origin + direction * (ray_hit.ray.tfar as f64) + Vector3::new(0.0, 0.0, 1.0);
+            let pt = origin + direction * (ray_hit.ray.tfar as f64) + Vector3::new(0.0, 1.0, 0.0);
 
             if pt[2] < bounds.lower_z as f64 + ground {
                 positions.push(pt);
@@ -170,13 +201,11 @@ fn generate_cameras_grid(
             // choose a random direction looking at the horizon
             // TODO: check that we are not too close to an object
             let dir = thread_rng().gen_range(0.0, 2.0 * std::f64::consts::PI);
-            let down_x = cgmath::Quaternion::from_angle_y(cgmath::Rad(std::f64::consts::PI / 2.0));
-            let around_z = cgmath::Quaternion::from_angle_z(cgmath::Rad(dir));
+            let around_z = Basis3::from_angle_y(cgmath::Rad(dir));
             Camera::from_position_direction(
                 position,
-                axis_angle_from_quaternion(&(around_z * down_x)),
+                around_z,
                 Vector3::new(1.0, 0.0, 0.0),
-                (1024, 1024),
             )
         })
         .collect::<Vec<_>>()
@@ -184,14 +213,14 @@ fn generate_cameras_grid(
 
 fn iter_triangles<'a>(
     model: &'a tobj::Model,
-) -> impl Iterator<Item = (Vector3<f64>, Vector3<f64>, Vector3<f64>)> + 'a {
+) -> impl Iterator<Item = (Point3<f64>, Point3<f64>, Point3<f64>)> + 'a {
     model
         .mesh
         .indices
         .iter()
         .map(move |index| {
             let i: usize = *index as usize;
-            Vector3::new(
+            Point3::new(
                 model.mesh.positions[i * 3] as f64,
                 model.mesh.positions[i * 3 + 1] as f64,
                 model.mesh.positions[i * 3 + 2] as f64,
@@ -201,7 +230,7 @@ fn iter_triangles<'a>(
 }
 
 /// Choose a uniformly distributed random point in the given triangle.
-fn random_point_in_triangle(v0: Vector3<f64>, v1: Vector3<f64>, v2: Vector3<f64>) -> Vector3<f64> {
+fn random_point_in_triangle(v0: Point3<f64>, v1: Point3<f64>, v2: Point3<f64>) -> Point3<f64> {
     let mut rx = thread_rng().gen_range(0.0, 1.0);
     let mut ry = thread_rng().gen_range(0.0, 1.0);
 
@@ -214,10 +243,11 @@ fn random_point_in_triangle(v0: Vector3<f64>, v1: Vector3<f64>, v2: Vector3<f64>
     v0 + rx * (v1 - v0) + ry * (v2 - v0)
 }
 
+// TODO: only generate points that are close enough to cameras
 fn generate_world_points_poisson(
     models: &Vec<tobj::Model>,
     num_points: usize,
-) -> Vec<Vector3<f64>> {
+) -> Vec<Point3<f64>> {
     // calculate total area
     let total_area: f64 = models
         .iter()
@@ -251,7 +281,7 @@ fn generate_world_points_poisson(
 fn visibility_graph(
     scene: &embree_rs::CommittedScene,
     cameras: &Vec<Camera>,
-    points: &Vec<Vector3<f64>>,
+    points: &Vec<Point3<f64>>,
     max_dist: f64,
 ) -> Vec<Vec<(usize, (f64, f64))>> {
     let pb = ProgressBar::new(cameras.len().try_into().unwrap());
@@ -273,23 +303,24 @@ fn visibility_graph(
                 // project point into camera frame
                 let p_camera = camera.project_world(point);
                 // check if point is infront of camera (camera looks down negative z)
-                if (camera.center() - point).magnitude() < max_dist && p_camera.z < 0.0 {
+                if (camera.center() - point).magnitude() < max_dist && p_camera.z <= 0.0 {
                     let p = camera.project(p_camera);
 
                     // check point is in camera frame
-                    if p.x >= 0.0
-                        && p.x < camera.img_size.0 as f64
-                        && p.y >= 0.0
-                        && p.y < camera.img_size.1 as f64
+                    if p.x >= -1.0
+                        && p.x <= 1.0
+                        && p.y >= -1.0
+                        && p.y < 1.0
                     {
                         // ray pointing from camera towards the point
                         let dir = point - camera.center();
                         let mut ray = embree_rs::Ray::new(
-                            camera.center().cast::<f32>().unwrap(),
+                            camera.center().cast::<f32>().unwrap().to_vec(),
                             dir.normalize().cast::<f32>().unwrap(),
                         );
 
-                        // add rays to batch check
+                        // Check if there is anything between the camera and the point. We stop a
+                        // little short of the point to make sure we don't hit it.
                         ray.tfar = dir.magnitude() as f32 - 1e-4;
                         local_rays.push(ray);
                         local_obs.push((i, (p.x, p.y)));
@@ -313,7 +344,7 @@ fn visibility_graph(
 fn write_cameras(
     path: &std::path::Path,
     cameras: &Vec<Camera>,
-    points: &Vec<Vector3<f64>>,
+    points: &Vec<Point3<f64>>,
 ) -> Result<(), std::io::Error> {
     let mut ply = Ply::<DefaultElement>::new();
     let mut point_element = ElementDef::new("vertex".to_string());
@@ -345,6 +376,19 @@ fn write_cameras(
             point
         })
         .collect();
+
+    let cs_proj = cameras.iter().map(|camera| {
+            let mut point = DefaultElement::new();
+            let p = camera.to_world(Point3::new(0.0, 0.0, -1.0));
+            point.insert("x".to_string(), Property::Float(p[0] as f32));
+            point.insert("y".to_string(), Property::Float(p[1] as f32));
+            point.insert("z".to_string(), Property::Float(p[2] as f32));
+            point.insert("red".to_string(), Property::UChar(0));
+            point.insert("green".to_string(), Property::UChar(0));
+            point.insert("blue".to_string(), Property::UChar(255));
+            point
+    }).collect::<Vec<_>>();
+    cs.extend(cs_proj);
 
     let pts = points.iter().map(|point| {
         let mut p = DefaultElement::new();
@@ -416,12 +460,25 @@ fn main() -> Result<(), std::io::Error> {
     let opt = Opt::from_args();
 
     let city_obj = tobj::load_obj(&opt.input);
-    let (models_, _) = city_obj.unwrap();
+    let (mut models, _) = city_obj.unwrap();
 
-    let models = if opt.normalize {
-        normalize(&models_)
+    let model_path = if let Some(path) = opt.path {
+        let i = models.iter().position(|x| x.name == path);
+        let model_path = match i {
+            Some(j) => Some(models[j].clone()),
+            None => {
+                let names = models.iter().map(|x| x.name.clone()).join(", ");
+                panic!("Could not find a path named {}. Available model names are {}", path, names);
+            }
+        };
+        models.retain(|m| m.name != path);
+        model_path
     } else {
-        models_
+        None
+    };
+
+    if opt.normalize {
+        models = normalize(&models);
     };
 
     // create embree device
@@ -439,7 +496,11 @@ fn main() -> Result<(), std::io::Error> {
 
     let cscene = scene.commit();
 
-    let cameras = generate_cameras_grid(&cscene, opt.num_cameras, opt.ground);
+    let cameras = if let Some(m_path) = model_path {
+        generate_cameras_path(&cscene, &m_path, opt.num_cameras)
+    } else {
+        generate_cameras_grid(&cscene, opt.num_cameras, opt.ground)
+    };
     println!("Generated {} cameras", cameras.len());
 
     let points = generate_world_points_poisson(&models, opt.num_world_points);
@@ -460,7 +521,8 @@ fn main() -> Result<(), std::io::Error> {
     // TODO: sort cameras, points by xy location to have a less random matrix?
 
     // Remove cameras that view too few points and points that are viewed by too few cameras.
-    let bal_lcc = if !opt.no_lcc { bal.cull() } else { bal };
+    // let bal_lcc = if !opt.no_lcc { bal.cull() } else { bal };
+    let bal_lcc = if !opt.no_lcc { bal.remove_singletons() } else { bal };
     println!(
         "Computed LCC with {} cameras, {} points, {} edges",
         bal_lcc.cameras.len(),

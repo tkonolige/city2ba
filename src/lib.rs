@@ -5,7 +5,8 @@ extern crate itertools;
 extern crate nom;
 extern crate rayon;
 
-use cgmath::{ElementWise, InnerSpace, Vector3};
+use cgmath::prelude::*;
+use cgmath::{AbsDiffEq, ElementWise, InnerSpace, Vector3, Basis3, Quaternion, Rotation3, Rotation, Point3, Point2};
 use nom::character::streaming::*;
 use nom::error::VerboseError;
 use nom::multi::count;
@@ -40,68 +41,82 @@ impl From<std::io::Error> for Error {
     }
 }
 
-fn from_rodrigues<T>(x: Vector3<T>) -> cgmath::Matrix3<T>
-where
-    T: cgmath::BaseFloat,
+fn from_rodrigues(x: Vector3<f64>) -> Basis3<f64>
 {
-    let angle = cgmath::Rad(x.magnitude());
-    let axis = x.normalize();
-    cgmath::Matrix3::from_axis_angle(axis, angle)
+    let theta2 = x.dot(x);
+    if theta2 > cgmath::Rad::<f64>::default_epsilon() {
+        let angle = cgmath::Rad(x.magnitude());
+        let axis = x.normalize();
+        cgmath::Basis3::from_axis_angle(axis, angle)
+    } else {
+        // taylor series approximation from ceres-solver
+        Basis3::from(Quaternion::from(cgmath::Matrix3::new(1.0, x[2], -x[1], -x[2], 1.0, x[0], x[1], -x[0], 1.0)))
+    }
+}
+
+fn to_rodrigues(x: Basis3<f64>) -> Vector3<f64>
+    {
+        let q = Quaternion::from(x);
+        let angle = 2.0 * q.s.acos();
+        let axis = q.v / (1.0 - q.s * q.s).sqrt();
+        axis.normalize() * angle
 }
 
 /// Camera expressed as Rx+t with intrinsics
+/// The camera points down the negative z axis. Up is the positive y axis.
 #[derive(Debug, Clone)]
 pub struct Camera {
-    loc: Vector3<f64>,    // t
-    dir: Vector3<f64>,    // Rodriguez R
-    intrin: Vector3<f64>, // focal length, radial distortion x2
-    pub img_size: (usize, usize),
+    loc: Vector3<f64>,            // t -- translation
+    dir: Basis3<f64>,            // R -- rotation
+    intrin: Vector3<f64>,         // focal length, radial distortion x2
 }
 
 impl Camera {
     /// Project a point from the world into the camera coordinate system
-    pub fn project_world(&self, p: &Vector3<f64>) -> cgmath::Vector3<f64> {
-        from_rodrigues(self.dir) * p + self.loc
+    pub fn project_world(&self, p: &Point3<f64>) -> cgmath::Point3<f64> {
+        self.dir.rotate_point(*p) + self.loc
     }
 
     /// Project a point from camera space into pixel coordinates
-    pub fn project(&self, p: cgmath::Vector3<f64>) -> cgmath::Vector2<f64> {
+    pub fn project(&self, p: cgmath::Point3<f64>) -> cgmath::Point2<f64> {
         let p_ = cgmath::Vector2::new(-p.x / p.z, -p.y / p.z);
         let r = 1.0
             + self.distortion().0 * p_.magnitude2()
             + self.distortion().1 * p_.magnitude().powf(4.0);
-        self.focal_length() * r * p_
+        Point2::from_vec(self.focal_length() * r * p_)
     }
 
     pub fn from_vec(x: Vec<f64>) -> Self {
         Camera {
-            dir: Vector3::new(x[0], x[1], x[2]),
+            dir: from_rodrigues(Vector3::new(x[0], x[1], x[2])),
             loc: Vector3::new(x[3], x[4], x[5]),
             intrin: Vector3::new(x[6], x[7], x[8]),
-            img_size: (1024, 1024),
         }
+    }
+
+    pub fn to_vec(&self) -> Vec<f64> {
+        let r = to_rodrigues(self.dir);
+        vec![r.x, r.y, r.z, self.loc.x, self.loc.y, self.loc.z, self.intrin.x, self.intrin.y, self.intrin.z]
     }
 
     pub fn from_position_direction(
-        position: Vector3<f64>,
-        dir: Vector3<f64>,
+        position: Point3<f64>,
+        dir: Basis3<f64>,
         intrin: Vector3<f64>,
-        img_size: (usize, usize),
     ) -> Self {
         Camera {
-            loc: -1.0 * from_rodrigues(dir) * position,
+            loc: -1.0 * (dir.rotate_point(position)).to_vec(),
             dir: dir,
             intrin: intrin,
-            img_size: img_size,
         }
     }
 
-    pub fn center(&self) -> Vector3<f64> {
-        -(from_rodrigues(-self.dir) * self.loc)
+    pub fn center(&self) -> Point3<f64> {
+        Point3::from_vec(-(self.dir.invert().rotate_vector(self.loc)))
     }
 
-    pub fn rotation(&self) -> cgmath::Matrix3<f64> {
-        from_rodrigues(self.dir)
+    pub fn rotation(&self) -> Basis3<f64> {
+        self.dir
     }
 
     pub fn focal_length(&self) -> f64 {
@@ -112,26 +127,52 @@ impl Camera {
         (self.intrin[1], self.intrin[2])
     }
 
-    // TODO: fix dir so it is actually composing rotations
     pub fn transform(
         &self,
-        delta_dir: Vector3<f64>,
+        delta_dir: Basis3<f64>,
         delta_loc: Vector3<f64>,
         delta_intrin: Vector3<f64>,
     ) -> Camera {
         Camera {
-            dir: self.dir + delta_dir,
-            loc: -1.0 * self.rotation() * (self.center() + delta_loc),
+            dir: self.dir * delta_dir,
+            loc: -1.0 * self.rotation().rotate_point(self.center() + delta_loc).to_vec(),
             intrin: self.intrin + delta_intrin,
-            img_size: self.img_size,
         }
     }
+
+    pub fn to_world(&self, p: Point3<f64>) -> Point3<f64> {
+        self.dir.invert().rotate_point(p - self.loc)
+    }
+}
+
+#[test]
+fn test_project_world() {
+    let p = Point3::new(0.0, 0.0, -1.0);
+    let c = Camera::from_vec(vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+    let p_camera = c.project_world(&p);
+    assert!(p_camera.z < 0.0);
+    assert!(p_camera.x == 0.0 && p_camera.y == 0.0);
+}
+
+#[test]
+fn test_project() {
+    let p = Point3::new(0.0, 0.0, -1.0);
+    let c = Camera::from_vec(vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+    let uv = c.project(c.project_world(&p));
+    assert!(uv.x == 0.0 && uv.y == 0.0);
+}
+
+#[test]
+fn test_project_isomorphic() {
+    let p = Point3::new(1.0, 3.0, -1.0);
+    let c = Camera::from_vec(vec![3.0, 5.0, -2.0, 0.5, -0.2, 0.1, 1.0, 0.0, 0.0]);
+    assert!(c.to_world(c.project_world(&p)).abs_diff_eq(&p, 1e-8));
 }
 
 pub fn total_reprojection_error(
     vis_graph: &Vec<Vec<(usize, (f64, f64))>>,
     cameras: &Vec<Camera>,
-    points: &Vec<Vector3<f64>>,
+    points: &Vec<Point3<f64>>,
 ) -> f64 {
     cameras
         .par_iter()
@@ -150,7 +191,7 @@ pub fn total_reprojection_error(
 pub fn total_reprojection_error_l2(
     vis_graph: &Vec<Vec<(usize, (f64, f64))>>,
     cameras: &Vec<Camera>,
-    points: &Vec<Vector3<f64>>,
+    points: &Vec<Point3<f64>>,
 ) -> f64 {
     cameras
         .par_iter()
@@ -168,10 +209,10 @@ pub fn total_reprojection_error_l2(
         * 2.0
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BALProblem {
     pub cameras: Vec<Camera>,
-    pub points: Vec<Vector3<f64>>,
+    pub points: Vec<Point3<f64>>,
     pub vis_graph: Vec<Vec<(usize, (f64, f64))>>,
 }
 
@@ -188,9 +229,9 @@ impl BALProblem {
         let num = (self.cameras.len() + self.points.len()) as f64;
         self.cameras
             .iter()
-            .map(|x| &x.loc)
-            .chain(self.points.iter())
-            .fold(Vector3::new(0.0, 0.0, 0.0), |a, &b| a + b / num)
+            .map(|x| x.center().clone())
+            .chain(self.points.clone().into_iter())
+            .fold(Vector3::new(0.0, 0.0, 0.0), |a, b| a + b.to_vec() / num)
     }
 
     pub fn std(&self) -> Vector3<f64> {
@@ -199,9 +240,9 @@ impl BALProblem {
         (self
             .cameras
             .iter()
-            .map(|x| &x.loc)
-            .chain(self.points.iter())
-            .map(|x| (x - mean).mul_element_wise(x - mean))
+            .map(|x| x.center().clone())
+            .chain(self.points.clone().into_iter())
+            .map(|x| (x.to_vec() - mean).mul_element_wise(x.to_vec() - mean))
             .sum::<Vector3<f64>>()
             / num)
             .map(|x| x.sqrt())
@@ -209,7 +250,7 @@ impl BALProblem {
 
     pub fn new(
         cams: Vec<Camera>,
-        points: Vec<Vector3<f64>>,
+        points: Vec<Point3<f64>>,
         obs: Vec<(usize, usize, f64, f64)>,
     ) -> Self {
         let mut vis_graph = vec![Vec::new(); cams.len()];
@@ -252,7 +293,7 @@ impl BALProblem {
             });
             let (input, cameras) = count(camera, num_cameras)(input)?;
             let point = nom::combinator::map(count(preceded(multispace0, double), 3), |x| {
-                Vector3::new(x[0], x[1], x[2])
+                Point3::new(x[0], x[1], x[2])
             });
             let (input, points) = count(point, num_points)(input)?;
 
@@ -304,7 +345,7 @@ impl BALProblem {
             let (input, points) = count(
                 |input| {
                     let (input, p) = count(be_f64, 3)(input)?;
-                    Ok((input, Vector3::new(p[0], p[1], p[2])))
+                    Ok((input, Point3::new(p[0], p[1], p[2])))
                 },
                 num_points as usize,
             )(input)?;
@@ -418,7 +459,7 @@ impl BALProblem {
             .vis_graph
             .iter()
             .enumerate()
-            .filter(|(_, v)| v.len() > 3)
+            .filter(|(_, v)| v.len() > 0)
             .map(|(i, _)| i)
             .collect::<Vec<_>>();
 
@@ -434,15 +475,21 @@ impl BALProblem {
         let pi = point_count
             .iter()
             .enumerate()
-            .filter(|(_, c)| **c > 1)
+            .filter(|(_, c)| **c > 0)
             .map(|(i, _)| i)
             .collect::<Vec<_>>();
+
+        println!("cameras: {} {}", self.num_cameras(), ci.len());
+        println!("points: {} {}", self.num_points(), pi.len());
 
         self.subset(ci.as_slice(), pi.as_slice())
     }
 
     /// Get the largest connected component of cameras and points.
     pub fn largest_connected_component(&self) -> Self {
+        if self.num_cameras() <= 0 {
+            return (*self).clone();
+        }
         let mut uf = UnionFind::new(self.num_points() + self.num_cameras());
 
         // point index is num_cameras + point id
@@ -555,16 +602,8 @@ impl BALProblem {
         for camera in &self.cameras {
             writeln!(
                 &mut file,
-                "{} {} {} {} {} {} {} {} {}",
-                camera.dir[0],
-                camera.dir[1],
-                camera.dir[2],
-                camera.loc[0],
-                camera.loc[1],
-                camera.loc[2],
-                camera.intrin[0],
-                camera.intrin[1],
-                camera.intrin[2],
+                "{}",
+                camera.to_vec().iter().join(" ")
             )?;
         }
 
@@ -591,15 +630,9 @@ impl BALProblem {
         }
 
         for camera in &self.cameras {
-            file.write_f64::<BigEndian>(camera.dir[0] as f64)?;
-            file.write_f64::<BigEndian>(camera.dir[1] as f64)?;
-            file.write_f64::<BigEndian>(camera.dir[2] as f64)?;
-            file.write_f64::<BigEndian>(camera.loc[0] as f64)?;
-            file.write_f64::<BigEndian>(camera.loc[1] as f64)?;
-            file.write_f64::<BigEndian>(camera.loc[2] as f64)?;
-            file.write_f64::<BigEndian>(camera.intrin[0] as f64)?;
-            file.write_f64::<BigEndian>(camera.intrin[1] as f64)?;
-            file.write_f64::<BigEndian>(camera.intrin[2] as f64)?;
+            for x in camera.to_vec().into_iter() {
+                file.write_f64::<BigEndian>(x)?;
+            }
         }
 
         for point in &self.points {
