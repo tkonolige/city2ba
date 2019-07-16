@@ -144,7 +144,7 @@ dependencies = [
  "rayon 1.0.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "rstar 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "structopt 0.2.17 (registry+https://github.com/rust-lang/crates.io-index)",
- "tobj 0.1.7",
+ "tobj 0.1.7 (git+https://github.com/tkonolige/tobj.git)",
 ]
 
 [[package]]
@@ -928,6 +928,7 @@ dependencies = [
 [[package]]
 name = "tobj"
 version = "0.1.7"
+source = "git+https://github.com/tkonolige/tobj.git#31df877cacca4b73edde88764594c3c772883c10"
 
 [[package]]
 name = "typenum"
@@ -1130,6 +1131,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum termios 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)" = "72b620c5ea021d75a735c943269bb07d30c9b77d6ac6b236bc8b5c496ef05625"
 "checksum textwrap 0.11.0 (registry+https://github.com/rust-lang/crates.io-index)" = "d326610f408c7a4eb6f51c37c330e496b08506c9457c9d34287ecc38809fb060"
 "checksum thread_local 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)" = "c6b53e329000edc2b34dbe8545fd20e55a333362d0a321909685a19bd28c3f1b"
+"checksum tobj 0.1.7 (git+https://github.com/tkonolige/tobj.git)" = "<none>"
 "checksum typenum 1.10.0 (registry+https://github.com/rust-lang/crates.io-index)" = "612d636f949607bdf9b123b4a6f6d966dedf3ff669f7f045890d3a4a73948169"
 "checksum ucd-util 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)" = "535c204ee4d8434478593480b8f86ab45ec9aae0e83c568ca81abf0fd0e88f86"
 "checksum unicode-segmentation 1.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "1967f4cdfc355b37fd76d2a954fb2ed3871034eb4f26d60537d88795cfc332a9"

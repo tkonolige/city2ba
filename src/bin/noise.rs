@@ -89,7 +89,13 @@ fn add_drift(bal: BALProblem, strength: f64, std: f64) -> BALProblem {
         .iter()
         .map(|c| c.center())
         .chain(bal.points.clone().into_iter())
-        .fold1(|x, y| if x.distance(EuclideanSpace::origin()) < y.distance(EuclideanSpace::origin()) { x } else { y })
+        .fold1(|x, y| {
+            if x.distance(EuclideanSpace::origin()) < y.distance(EuclideanSpace::origin()) {
+                x
+            } else {
+                y
+            }
+        })
         .unwrap();
 
     let r = Normal::new(1.0, std.into());

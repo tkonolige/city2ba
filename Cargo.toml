@@ -6,7 +6,7 @@ build = "build.rs"
 edition = "2018"
 
 [dependencies]
-tobj = {path = "/Users/tristan/Sync/Research/bundle_adjustment/tobj"}
+tobj = {git = "https://github.com/tkonolige/tobj.git"}
 cgmath = "*"
 structopt = "*"
 rand = "0.6"

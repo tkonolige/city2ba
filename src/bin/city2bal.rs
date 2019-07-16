@@ -11,8 +11,8 @@ extern crate structopt;
 extern crate tobj;
 
 use itertools::Itertools;
+use rand::distributions::{Distribution, WeightedIndex};
 use rand::{thread_rng, Rng};
-use rand::distributions::Distribution;
 use structopt::StructOpt;
 
 use indicatif::{ParallelProgressIterator, ProgressBar, ProgressStyle};
@@ -27,7 +27,7 @@ use std::fs::File;
 use std::io::BufWriter;
 
 use cgmath::prelude::*;
-use cgmath::{ElementWise, InnerSpace, Vector3, Vector4, Point3, Basis3};
+use cgmath::{Basis3, ElementWise, InnerSpace, Point3, Vector3, Vector4};
 
 use rayon::prelude::*;
 
@@ -202,31 +202,33 @@ fn generate_cameras_grid(
             // TODO: check that we are not too close to an object
             let dir = thread_rng().gen_range(0.0, 2.0 * std::f64::consts::PI);
             let around_z = Basis3::from_angle_y(cgmath::Rad(dir));
-            Camera::from_position_direction(
-                position,
-                around_z,
-                Vector3::new(1.0, 0.0, 0.0),
-            )
+            Camera::from_position_direction(position, around_z, Vector3::new(1.0, 0.0, 0.0))
         })
         .collect::<Vec<_>>()
 }
 
 fn iter_triangles<'a>(
-    model: &'a tobj::Model,
+    mesh: &'a tobj::Mesh,
 ) -> impl Iterator<Item = (Point3<f64>, Point3<f64>, Point3<f64>)> + 'a {
-    model
-        .mesh
-        .indices
+    mesh.indices
         .iter()
         .map(move |index| {
             let i: usize = *index as usize;
             Point3::new(
-                model.mesh.positions[i * 3] as f64,
-                model.mesh.positions[i * 3 + 1] as f64,
-                model.mesh.positions[i * 3 + 2] as f64,
+                mesh.positions[i * 3] as f64,
+                mesh.positions[i * 3 + 1] as f64,
+                mesh.positions[i * 3 + 2] as f64,
             )
         })
         .tuples::<(_, _, _)>()
+}
+
+fn get_triangle(mesh: &tobj::Mesh, i: usize) -> (Point3<f64>, Point3<f64>, Point3<f64>) {
+    let v = (0..3).map(|j| {
+        let i0 = mesh.indices[i * 3 + j] as usize;
+        Point3::new(mesh.positions[i0], mesh.positions[i0+1], mesh.positions[i0+2]).cast::<f64>().unwrap()
+    }).collect::<Vec<_>>();
+    (v[0], v[1], v[2])
 }
 
 /// Choose a uniformly distributed random point in the given triangle.
@@ -244,35 +246,28 @@ fn random_point_in_triangle(v0: Point3<f64>, v1: Point3<f64>, v2: Point3<f64>) -
 }
 
 // TODO: only generate points that are close enough to cameras
-fn generate_world_points_poisson(
-    models: &Vec<tobj::Model>,
-    num_points: usize,
-) -> Vec<Point3<f64>> {
-    // calculate total area
-    let total_area: f64 = models
+fn generate_world_points_poisson(models: &Vec<tobj::Model>, num_points: usize) -> Vec<Point3<f64>> {
+    // TODO: filter meshes by distance from cameras
+    let areas = models.iter().flat_map(|model| {
+        iter_triangles(&model.mesh)
+            .map(|(v0, v1, v2)| ((v1 - v0).cross(v2 - v0).magnitude() / 2.0) as f64)
+    });
+    let indices = models
         .iter()
-        .map(|model| {
-            iter_triangles(model)
-                .map(|(v0, v1, v2)| ((v1 - v0).cross(v2 - v0).magnitude() / 2.0) as f64)
-                .sum::<f64>()
-        })
-        .sum();
+        .enumerate()
+        .flat_map(|(i, model)| iter_triangles(&model.mesh).enumerate().map(move |(j, _)| (i, j)))
+        .collect::<Vec<_>>();
 
-    let mut points = Vec::new();
+    let dist = WeightedIndex::new(areas).unwrap();
+    let mut rng = thread_rng();
 
-    for model in models {
-        for (v0, v1, v2) in iter_triangles(model) {
-            let area = ((v1 - v0).cross(v2 - v0).magnitude() / 2.0) as f64;
-            let mut num_samples = area / total_area * num_points as f64;
-            // TODO: fix this probability
-            while num_samples > 1.0 {
-                points.push(random_point_in_triangle(v0, v1, v2));
-                num_samples -= 1.0;
-            }
-            if thread_rng().gen_bool(num_samples as f64) {
-                points.push(random_point_in_triangle(v0, v1, v2));
-            }
-        }
+    let mut points = Vec::with_capacity(num_points);
+    while points.len() < num_points {
+        let i = dist.sample(&mut rng);
+        let (m, j) = indices[i];
+        let mesh = &models[m].mesh;
+        let (v0, v1, v2) = get_triangle(mesh, j);
+        points.push(random_point_in_triangle(v0, v1, v2));
     }
 
     points
@@ -307,11 +302,7 @@ fn visibility_graph(
                     let p = camera.project(p_camera);
 
                     // check point is in camera frame
-                    if p.x >= -1.0
-                        && p.x <= 1.0
-                        && p.y >= -1.0
-                        && p.y < 1.0
-                    {
+                    if p.x >= -1.0 && p.x <= 1.0 && p.y >= -1.0 && p.y < 1.0 {
                         // ray pointing from camera towards the point
                         let dir = point - camera.center();
                         let mut ray = embree_rs::Ray::new(
@@ -377,7 +368,9 @@ fn write_cameras(
         })
         .collect();
 
-    let cs_proj = cameras.iter().map(|camera| {
+    let cs_proj = cameras
+        .iter()
+        .map(|camera| {
             let mut point = DefaultElement::new();
             let p = camera.to_world(Point3::new(0.0, 0.0, -1.0));
             point.insert("x".to_string(), Property::Float(p[0] as f32));
@@ -387,7 +380,8 @@ fn write_cameras(
             point.insert("green".to_string(), Property::UChar(0));
             point.insert("blue".to_string(), Property::UChar(255));
             point
-    }).collect::<Vec<_>>();
+        })
+        .collect::<Vec<_>>();
     cs.extend(cs_proj);
 
     let pts = points.iter().map(|point| {
@@ -468,7 +462,10 @@ fn main() -> Result<(), std::io::Error> {
             Some(j) => Some(models[j].clone()),
             None => {
                 let names = models.iter().map(|x| x.name.clone()).join(", ");
-                panic!("Could not find a path named {}. Available model names are {}", path, names);
+                panic!(
+                    "Could not find a path named {}. Available model names are {}",
+                    path, names
+                );
             }
         };
         models.retain(|m| m.name != path);
@@ -483,17 +480,11 @@ fn main() -> Result<(), std::io::Error> {
 
     // create embree device
     let dev = embree_rs::Device::new();
-
-    let meshes = models
-        .iter()
-        .map(|model| add_model(model, &dev))
-        .collect::<Vec<_>>();
-
     let mut scene = embree_rs::Scene::new(&dev);
-    for mesh in meshes.into_iter() {
+    for model in models.iter() {
+        let mesh = add_model(model, &dev);
         scene.attach_geometry(mesh);
     }
-
     let cscene = scene.commit();
 
     let cameras = if let Some(m_path) = model_path {
@@ -522,7 +513,11 @@ fn main() -> Result<(), std::io::Error> {
 
     // Remove cameras that view too few points and points that are viewed by too few cameras.
     // let bal_lcc = if !opt.no_lcc { bal.cull() } else { bal };
-    let bal_lcc = if !opt.no_lcc { bal.remove_singletons() } else { bal };
+    let bal_lcc = if !opt.no_lcc {
+        bal.remove_singletons()
+    } else {
+        bal
+    };
     println!(
         "Computed LCC with {} cameras, {} points, {} edges",
         bal_lcc.cameras.len(),

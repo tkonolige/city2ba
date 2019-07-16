@@ -6,7 +6,10 @@ extern crate nom;
 extern crate rayon;
 
 use cgmath::prelude::*;
-use cgmath::{AbsDiffEq, ElementWise, InnerSpace, Vector3, Basis3, Quaternion, Rotation3, Rotation, Point3, Point2};
+use cgmath::{
+    AbsDiffEq, Basis3, ElementWise, InnerSpace, Point2, Point3, Quaternion, Rotation, Rotation3,
+    Vector3,
+};
 use nom::character::streaming::*;
 use nom::error::VerboseError;
 use nom::multi::count;
@@ -41,8 +44,7 @@ impl From<std::io::Error> for Error {
     }
 }
 
-fn from_rodrigues(x: Vector3<f64>) -> Basis3<f64>
-{
+fn from_rodrigues(x: Vector3<f64>) -> Basis3<f64> {
     let theta2 = x.dot(x);
     if theta2 > cgmath::Rad::<f64>::default_epsilon() {
         let angle = cgmath::Rad(x.magnitude());
@@ -50,25 +52,26 @@ fn from_rodrigues(x: Vector3<f64>) -> Basis3<f64>
         cgmath::Basis3::from_axis_angle(axis, angle)
     } else {
         // taylor series approximation from ceres-solver
-        Basis3::from(Quaternion::from(cgmath::Matrix3::new(1.0, x[2], -x[1], -x[2], 1.0, x[0], x[1], -x[0], 1.0)))
+        Basis3::from(Quaternion::from(cgmath::Matrix3::new(
+            1.0, x[2], -x[1], -x[2], 1.0, x[0], x[1], -x[0], 1.0,
+        )))
     }
 }
 
-fn to_rodrigues(x: Basis3<f64>) -> Vector3<f64>
-    {
-        let q = Quaternion::from(x);
-        let angle = 2.0 * q.s.acos();
-        let axis = q.v / (1.0 - q.s * q.s).sqrt();
-        axis.normalize() * angle
+fn to_rodrigues(x: Basis3<f64>) -> Vector3<f64> {
+    let q = Quaternion::from(x);
+    let angle = 2.0 * q.s.acos();
+    let axis = q.v / (1.0 - q.s * q.s).sqrt();
+    axis.normalize() * angle
 }
 
 /// Camera expressed as Rx+t with intrinsics
 /// The camera points down the negative z axis. Up is the positive y axis.
 #[derive(Debug, Clone)]
 pub struct Camera {
-    loc: Vector3<f64>,            // t -- translation
-    dir: Basis3<f64>,            // R -- rotation
-    intrin: Vector3<f64>,         // focal length, radial distortion x2
+    loc: Vector3<f64>,    // t -- translation
+    dir: Basis3<f64>,     // R -- rotation
+    intrin: Vector3<f64>, // focal length, radial distortion x2
 }
 
 impl Camera {
@@ -96,7 +99,17 @@ impl Camera {
 
     pub fn to_vec(&self) -> Vec<f64> {
         let r = to_rodrigues(self.dir);
-        vec![r.x, r.y, r.z, self.loc.x, self.loc.y, self.loc.z, self.intrin.x, self.intrin.y, self.intrin.z]
+        vec![
+            r.x,
+            r.y,
+            r.z,
+            self.loc.x,
+            self.loc.y,
+            self.loc.z,
+            self.intrin.x,
+            self.intrin.y,
+            self.intrin.z,
+        ]
     }
 
     pub fn from_position_direction(
@@ -135,7 +148,11 @@ impl Camera {
     ) -> Camera {
         Camera {
             dir: self.dir * delta_dir,
-            loc: -1.0 * self.rotation().rotate_point(self.center() + delta_loc).to_vec(),
+            loc: -1.0
+                * self
+                    .rotation()
+                    .rotate_point(self.center() + delta_loc)
+                    .to_vec(),
             intrin: self.intrin + delta_intrin,
         }
     }
@@ -479,9 +496,6 @@ impl BALProblem {
             .map(|(i, _)| i)
             .collect::<Vec<_>>();
 
-        println!("cameras: {} {}", self.num_cameras(), ci.len());
-        println!("points: {} {}", self.num_points(), pi.len());
-
         self.subset(ci.as_slice(), pi.as_slice())
     }
 
@@ -600,11 +614,7 @@ impl BALProblem {
         }
 
         for camera in &self.cameras {
-            writeln!(
-                &mut file,
-                "{}",
-                camera.to_vec().iter().join(" ")
-            )?;
+            writeln!(&mut file, "{}", camera.to_vec().iter().join(" "))?;
         }
 
         for point in &self.points {
