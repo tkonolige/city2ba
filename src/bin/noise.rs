@@ -413,6 +413,13 @@ fn main() -> Result<(), Error> {
     bal = add_incorrect_correspondences(bal, opt.mismatch_chance);
 
     println!(
+        "BAL Problem with {} cameras, {} points, {} correspondences",
+        bal.num_cameras(),
+        bal.num_points(),
+        bal.num_observations()
+    );
+
+    println!(
         "Final error: {:.2e} (L1) {:.2e} (L2)",
         bal.total_reprojection_error(),
         bal.total_reprojection_error_l2()

@@ -69,9 +69,9 @@ fn to_rodrigues(x: Basis3<f64>) -> Vector3<f64> {
 /// The camera points down the negative z axis. Up is the positive y axis.
 #[derive(Debug, Clone)]
 pub struct Camera {
-    loc: Vector3<f64>,    // t -- translation
-    dir: Basis3<f64>,     // R -- rotation
-    intrin: Vector3<f64>, // focal length, radial distortion x2
+    pub loc: Vector3<f64>,    // t -- translation
+    pub dir: Basis3<f64>,     // R -- rotation
+    pub intrin: Vector3<f64>, // focal length, radial distortion x2
 }
 
 impl Camera {
@@ -476,7 +476,7 @@ impl BALProblem {
             .vis_graph
             .iter()
             .enumerate()
-            .filter(|(_, v)| v.len() > 0)
+            .filter(|(_, v)| v.len() > 3)
             .map(|(i, _)| i)
             .collect::<Vec<_>>();
 
@@ -492,7 +492,7 @@ impl BALProblem {
         let pi = point_count
             .iter()
             .enumerate()
-            .filter(|(_, c)| **c > 0)
+            .filter(|(_, c)| **c > 1)
             .map(|(i, _)| i)
             .collect::<Vec<_>>();
 
@@ -587,12 +587,6 @@ impl BALProblem {
             nc = culled.num_cameras();
             np = culled.num_points();
             culled = culled.largest_connected_component().remove_singletons();
-        }
-
-        for (i, obs) in culled.vis_graph.iter().enumerate() {
-            if obs.len() < 2 {
-                println!("{} {}", i, obs.len());
-            }
         }
 
         culled

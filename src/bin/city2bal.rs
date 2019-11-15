@@ -1,4 +1,5 @@
 extern crate cgmath;
+extern crate city2bal;
 extern crate embree_rs;
 extern crate indicatif;
 extern crate itertools;
@@ -7,6 +8,7 @@ extern crate ply_rs;
 extern crate poisson;
 extern crate rand;
 extern crate rayon;
+extern crate rstar;
 extern crate structopt;
 extern crate tobj;
 
@@ -25,14 +27,24 @@ use ply_rs::writer::Writer;
 use std::convert::TryInto;
 use std::fs::File;
 use std::io::BufWriter;
+use std::str::FromStr;
 
 use cgmath::prelude::*;
 use cgmath::{Basis3, ElementWise, InnerSpace, Point3, Vector3, Vector4};
 
 use rayon::prelude::*;
 
-extern crate city2bal;
 use city2bal::*;
+
+use rstar::RTree;
+
+fn parse_vec3(s: &str) -> Result<Vector3<f64>, std::num::ParseFloatError> {
+    let mut it = s.split(",").map(|x| f64::from_str(x));
+    let x = it.next().unwrap()?;
+    let y = it.next().unwrap()?;
+    let z = it.next().unwrap()?;
+    Ok(Vector3::new(x, y, z))
+}
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "basic")]
@@ -42,6 +54,20 @@ struct Opt {
 
     #[structopt(long = "cameras", default_value = "100")]
     num_cameras: usize,
+
+    #[structopt(
+        long = "intrinsics-start",
+        default_value = "1,0,0",
+        parse(try_from_str = "parse_vec3")
+    )]
+    intrinsics_start: Vector3<f64>,
+
+    #[structopt(
+        long = "intrinsics-end",
+        default_value = "1,0,0",
+        parse(try_from_str = "parse_vec3")
+    )]
+    intrinsics_end: Vector3<f64>,
 
     #[structopt(long = "points", default_value = "1000")]
     num_world_points: usize,
@@ -224,10 +250,18 @@ fn iter_triangles<'a>(
 }
 
 fn get_triangle(mesh: &tobj::Mesh, i: usize) -> (Point3<f64>, Point3<f64>, Point3<f64>) {
-    let v = (0..3).map(|j| {
-        let i0 = mesh.indices[i * 3 + j] as usize;
-        Point3::new(mesh.positions[i0], mesh.positions[i0+1], mesh.positions[i0+2]).cast::<f64>().unwrap()
-    }).collect::<Vec<_>>();
+    let v = (0..3)
+        .map(|j| {
+            let i0 = mesh.indices[i * 3 + j] as usize;
+            Point3::new(
+                mesh.positions[i0 * 3],
+                mesh.positions[i0 * 3 + 1],
+                mesh.positions[i0 * 3 + 2],
+            )
+            .cast::<f64>()
+            .unwrap()
+        })
+        .collect::<Vec<_>>();
     (v[0], v[1], v[2])
 }
 
@@ -245,8 +279,38 @@ fn random_point_in_triangle(v0: Point3<f64>, v1: Point3<f64>, v2: Point3<f64>) -
     v0 + rx * (v1 - v0) + ry * (v2 - v0)
 }
 
-// TODO: only generate points that are close enough to cameras
-fn generate_world_points_poisson(models: &Vec<tobj::Model>, num_points: usize) -> Vec<Point3<f64>> {
+#[derive(Debug, Clone, PartialEq, Copy)]
+struct WrappedPoint(Point3<f64>);
+
+impl rstar::Point for WrappedPoint {
+    type Scalar = f64;
+    const DIMENSIONS: usize = 3;
+
+    fn generate(generator: impl Fn(usize) -> Self::Scalar) -> Self {
+        WrappedPoint(Point3::new(generator(0), generator(1), generator(2)))
+    }
+
+    fn nth(&self, index: usize) -> Self::Scalar {
+        let WrappedPoint(p) = self;
+        match index {
+            0 => p.x,
+            1 => p.y,
+            2 => p.z,
+            _ => unreachable!(),
+        }
+    }
+
+    fn nth_mut(&mut self, _index: usize) -> &mut Self::Scalar {
+        unimplemented!()
+    }
+}
+
+fn generate_world_points_poisson(
+    models: &Vec<tobj::Model>,
+    cameras: &Vec<Camera>,
+    num_points: usize,
+    max_dist: f64,
+) -> Vec<Point3<f64>> {
     // TODO: filter meshes by distance from cameras
     let areas = models.iter().flat_map(|model| {
         iter_triangles(&model.mesh)
@@ -255,11 +319,17 @@ fn generate_world_points_poisson(models: &Vec<tobj::Model>, num_points: usize) -
     let indices = models
         .iter()
         .enumerate()
-        .flat_map(|(i, model)| iter_triangles(&model.mesh).enumerate().map(move |(j, _)| (i, j)))
+        .flat_map(|(i, model)| {
+            iter_triangles(&model.mesh)
+                .enumerate()
+                .map(move |(j, _)| (i, j))
+        })
         .collect::<Vec<_>>();
 
     let dist = WeightedIndex::new(areas).unwrap();
     let mut rng = thread_rng();
+
+    let rtree = RTree::bulk_load(cameras.iter().map(|c| WrappedPoint(c.center())).collect());
 
     let mut points = Vec::with_capacity(num_points);
     while points.len() < num_points {
@@ -267,7 +337,14 @@ fn generate_world_points_poisson(models: &Vec<tobj::Model>, num_points: usize) -
         let (m, j) = indices[i];
         let mesh = &models[m].mesh;
         let (v0, v1, v2) = get_triangle(mesh, j);
-        points.push(random_point_in_triangle(v0, v1, v2));
+        let p = random_point_in_triangle(v0, v1, v2);
+        // check if point is close enough
+        if let Some(_) = rtree
+            .locate_within_distance(WrappedPoint(p), max_dist * max_dist)
+            .next()
+        {
+            points.push(p);
+        }
     }
 
     points
@@ -312,7 +389,7 @@ fn visibility_graph(
 
                         // Check if there is anything between the camera and the point. We stop a
                         // little short of the point to make sure we don't hit it.
-                        ray.tfar = dir.magnitude() as f32 - 1e-4;
+                        ray.tfar = dir.magnitude() as f32 - 1e-6;
                         local_rays.push(ray);
                         local_obs.push((i, (p.x, p.y)));
                     }
@@ -450,6 +527,22 @@ fn normalize(models: &Vec<tobj::Model>) -> Vec<tobj::Model> {
         .collect()
 }
 
+fn modify_intrinsics(
+    cameras: &mut Vec<Camera>,
+    intrinsic_start: Vector3<f64>,
+    intrinsic_end: Vector3<f64>,
+) {
+    let mut rng = rand::thread_rng();
+    for camera in cameras.iter_mut() {
+        let x = rng.gen_range(0.0, 1.0);
+        let y = rng.gen_range(0.0, 1.0);
+        let z = rng.gen_range(0.0, 1.0);
+        let v = Vector3::new(x, y, z);
+        camera.intrin =
+            intrinsic_start + v.mul_element_wise(intrinsic_end.sub_element_wise(intrinsic_start));
+    }
+}
+
 fn main() -> Result<(), std::io::Error> {
     let opt = Opt::from_args();
 
@@ -487,14 +580,18 @@ fn main() -> Result<(), std::io::Error> {
     }
     let cscene = scene.commit();
 
-    let cameras = if let Some(m_path) = model_path {
+    let mut cameras = if let Some(m_path) = model_path {
         generate_cameras_path(&cscene, &m_path, opt.num_cameras)
     } else {
         generate_cameras_grid(&cscene, opt.num_cameras, opt.ground)
     };
     println!("Generated {} cameras", cameras.len());
 
-    let points = generate_world_points_poisson(&models, opt.num_world_points);
+    modify_intrinsics(&mut cameras, opt.intrinsics_start, opt.intrinsics_end);
+    println!("Modified intrinsics");
+
+    let points =
+        generate_world_points_poisson(&models, &cameras, opt.num_world_points, opt.max_dist);
     println!("Generated {} world points", points.len());
 
     // TODO: use something more sophisticated to calculate the max distance
@@ -513,11 +610,7 @@ fn main() -> Result<(), std::io::Error> {
 
     // Remove cameras that view too few points and points that are viewed by too few cameras.
     // let bal_lcc = if !opt.no_lcc { bal.cull() } else { bal };
-    let bal_lcc = if !opt.no_lcc {
-        bal.remove_singletons()
-    } else {
-        bal
-    };
+    let bal_lcc = if !opt.no_lcc { bal.cull() } else { bal };
     println!(
         "Computed LCC with {} cameras, {} points, {} edges",
         bal_lcc.cameras.len(),
