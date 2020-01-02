@@ -84,14 +84,14 @@ struct Opt {
     #[structopt(long = "normalize")]
     normalize: bool,
 
-    #[structopt(long = "ply", parse(from_os_str))]
-    ply_out: Option<std::path::PathBuf>,
-
     #[structopt(name = "OUT", parse(from_os_str))]
     bal_out: std::path::PathBuf,
 
     #[structopt(long = "path")]
     path: Option<String>,
+
+    #[structopt(long = "step-size", default_value = "0")]
+    step_size: f64,
 }
 
 fn add_model<'a>(model: &tobj::Model, dev: &'a embree_rs::Device) -> embree_rs::Geometry<'a> {
@@ -148,6 +148,8 @@ fn generate_cameras_path(
         .collect::<Vec<_>>();
     let path_lengths = paths.iter().map(|(x, y)| (y - x).magnitude());
 
+    // We sample randomly from the path by taking a weighted sample of each path segment (weighted
+    // by segment length) and then uniformly sampling withing the segment.
     let mut rng = rand::thread_rng();
     let dist = rand::distributions::WeightedIndex::new(path_lengths).unwrap();
 
@@ -167,6 +169,65 @@ fn generate_cameras_path(
             )
         })
         .collect()
+}
+
+/// Generate camera positions along a path by starting at the beginning of the path and taking
+/// fixed sized steps between each camera.
+fn generate_cameras_path_step(
+    _scene: &embree_rs::CommittedScene,
+    path: &tobj::Model,
+    num_cameras: usize,
+    step_size: f64,
+) -> Vec<Camera> {
+    let vertices = path
+        .mesh
+        .positions
+        .iter()
+        .tuples()
+        .map(|(x, y, z)| Point3::new(*x as f64, *y as f64, *z as f64))
+        .collect::<Vec<_>>();
+    let paths = path
+        .mesh
+        .indices
+        .iter()
+        .tuples()
+        .map(|(i, j)| (vertices[*i as usize], vertices[*j as usize]))
+        .collect::<Vec<_>>();
+    let total_length = paths.iter().map(|(x, y)| (y - x).magnitude()).sum();
+    assert!(
+        num_cameras as f64 * step_size <= total_length,
+        "Length of path {} is less than the number of cameras ({}) times the step size ({}) {}",
+        total_length,
+        num_cameras,
+        step_size,
+        num_cameras as f64 * step_size
+    );
+
+    println!("Generating cameras along path. Path length: {}, using {} of it.", total_length, num_cameras as f64 * step_size);
+
+    let mut segment_index = 0;
+    let mut dist = 0.0;
+    let mut cameras = Vec::with_capacity(num_cameras);
+    for _ in 0..num_cameras {
+        let (start, end) = paths[segment_index];
+        let mut dir = end - start;
+        let pos = start + dist / dir.magnitude() * dir;
+        cameras.push(Camera::from_position_direction(
+            pos,
+            Basis3::between_vectors(dir.normalize(), Vector3::new(0.0, 0.0, -1.0)),
+            Vector3::new(1.0, 0.0, 0.0),
+        ));
+
+        // step to the next camera location
+        dist += step_size;
+        while dist >= dir.magnitude() {
+            segment_index += 1;
+            dist -= dir.magnitude();
+            let (start, end) = paths[segment_index];
+            dir = end - start;
+        }
+    }
+    cameras
 }
 
 // Generate camera locations by placing cameras on a regular grid throughout the image. Locations
@@ -581,7 +642,11 @@ fn main() -> Result<(), std::io::Error> {
     let cscene = scene.commit();
 
     let mut cameras = if let Some(m_path) = model_path {
-        generate_cameras_path(&cscene, &m_path, opt.num_cameras)
+        if opt.step_size <= 0.0 {
+            generate_cameras_path(&cscene, &m_path, opt.num_cameras)
+        } else {
+            generate_cameras_path_step(&cscene, &m_path, opt.num_cameras, opt.step_size)
+        }
     } else {
         generate_cameras_grid(&cscene, opt.num_cameras, opt.ground)
     };
