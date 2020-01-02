@@ -50,6 +50,9 @@ struct Opt {
     #[structopt(long = "drift-strength", default_value = "0.0")]
     drift_strength: f64,
 
+    #[structopt(long = "drift-angle", default_value = "0.0")]
+    drift_angle: f64,
+
     // Probability of a mismatch occurring in a match
     #[structopt(long = "mismatch-chance", default_value = "0.0")]
     mismatch_chance: f64,
@@ -80,7 +83,8 @@ fn unit_random() -> Vector3<f64> {
     .normalize()
 }
 
-fn add_drift(bal: BALProblem, strength: f64, std: f64) -> BALProblem {
+// TODO: add twisting to the noise
+fn add_drift(bal: BALProblem, strength: f64, angle_strength: f64, std: f64) -> BALProblem {
     // Choose the drift direction to be in line with the largest standard deviation.
     let dir = bal.std().normalize();
 
@@ -106,12 +110,17 @@ fn add_drift(bal: BALProblem, strength: f64, std: f64) -> BALProblem {
         let v = r.sample(&mut rand::thread_rng()) as f64;
         dir * strength * v * bal_std * distance * distance
     };
+    let drift_angle = |x: Point3<f64>| {
+        let distance = (x - origin).magnitude();
+        let v = r.sample(&mut rand::thread_rng()) as f64;
+        angle_strength * v * distance.powf(1.2)
+    };
     let cameras = bal
         .cameras
         .iter()
         .map(|c| {
             c.transform(
-                Basis3::from_angle_x(Rad(0.0)),
+                Basis3::from_angle_x(Rad(drift_angle(c.center()))),
                 drift_noise(c.center()),
                 Vector3::new(0.0, 0.0, 0.0),
             )
@@ -401,7 +410,7 @@ fn main() -> Result<(), Error> {
         bal = bal.cull();
     }
 
-    bal = add_drift(bal, opt.drift_strength, opt.drift_std);
+    bal = add_drift(bal, opt.drift_strength, opt.drift_angle, opt.drift_std);
     bal = add_noise(
         bal,
         opt.translation_std,
