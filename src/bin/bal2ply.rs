@@ -86,7 +86,7 @@ fn write_cameras(
 fn main() -> std::result::Result<(), city2bal::Error> {
     let opt = Opt::from_args();
 
-    let bal = BALProblem::from_file(&opt.input)?;
+    let bal = BAProblem::from_file(&opt.input)?;
 
     write_cameras(&opt.out, &bal.cameras, &bal.points)?;
 

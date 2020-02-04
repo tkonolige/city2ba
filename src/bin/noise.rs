@@ -5,9 +5,9 @@ extern crate city2bal;
 use city2bal::*;
 
 #[derive(StructOpt, Debug)]
-#[structopt(name = "noise", about = "Tool to add noise/error to a BAL problem")]
+#[structopt(name = "noise", about = "Tool to add noise/error to a BA problem")]
 struct Opt {
-    // Input BAL file
+    // Input BA file
     #[structopt(name = "FILE", parse(from_os_str))]
     input: std::path::PathBuf,
 
@@ -58,12 +58,12 @@ struct Opt {
 fn main() -> Result<(), Error> {
     let opt = Opt::from_args();
 
-    let mut bal = BALProblem::from_file(&opt.input)?;
+    let mut bal = BAProblem::from_file(&opt.input)?;
 
     println!(
         "Initial error: {:.2e} (L1) {:.2e} (L2)",
-        bal.total_reprojection_error(),
-        bal.total_reprojection_error_l2()
+        bal.total_reprojection_error(1.),
+        bal.total_reprojection_error(2.)
     );
 
     if opt.drop_features < 1.0 {
@@ -94,7 +94,7 @@ fn main() -> Result<(), Error> {
     bal = add_incorrect_correspondences(bal, opt.mismatch_chance);
 
     println!(
-        "BAL Problem with {} cameras, {} points, {} correspondences",
+        "BA Problem with {} cameras, {} points, {} correspondences",
         bal.num_cameras(),
         bal.num_points(),
         bal.num_observations()
@@ -102,8 +102,8 @@ fn main() -> Result<(), Error> {
 
     println!(
         "Final error: {:.2e} (L1) {:.2e} (L2)",
-        bal.total_reprojection_error(),
-        bal.total_reprojection_error_l2()
+        bal.total_reprojection_error(1.),
+        bal.total_reprojection_error(2.)
     );
 
     bal.write(&opt.output).map_err(Error::from)

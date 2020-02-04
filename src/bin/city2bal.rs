@@ -128,7 +128,7 @@ fn main() -> Result<(), std::io::Error> {
         "Computed visibility graph with {} edges",
         vis_graph.iter().map(|x| x.len()).sum::<usize>()
     );
-    let bal = BALProblem {
+    let bal = BAProblem {
         cameras: cameras,
         points: points,
         vis_graph: vis_graph,
@@ -147,7 +147,7 @@ fn main() -> Result<(), std::io::Error> {
 
     println!(
         "Total reprojection error: {}",
-        bal_lcc.total_reprojection_error()
+        bal_lcc.total_reprojection_error(1.)
     );
 
     bal_lcc.write(&opt.bal_out)?;

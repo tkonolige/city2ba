@@ -13,14 +13,15 @@ struct Opt {
 fn main() -> Result<(), Error> {
     let opt = Opt::from_args();
 
-    let bal_problem = BALProblem::from_file(&opt.input)?;
+    let ba_problem = BAProblem::from_file(&opt.input)?;
+    println!("{}", ba_problem);
     println!(
         "{} total reprojection error",
-        bal_problem.total_reprojection_error()
+        ba_problem.total_reprojection_error(1.)
     );
     println!(
         "{} total reprojection error (L2)",
-        bal_problem.total_reprojection_error_l2()
+        ba_problem.total_reprojection_error(2.)
     );
 
     Ok(())

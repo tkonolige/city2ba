@@ -185,10 +185,11 @@ fn test_project_isomorphic() {
     assert!(c.to_world(c.project_world(&p)).abs_diff_eq(&p, 1e-8));
 }
 
-pub fn total_reprojection_error(
+fn total_reprojection_error(
     vis_graph: &Vec<Vec<(usize, (f64, f64))>>,
     cameras: &Vec<Camera>,
     points: &Vec<Point3<f64>>,
+    norm: f64,
 ) -> f64 {
     cameras
         .par_iter()
@@ -197,48 +198,27 @@ pub fn total_reprojection_error(
             adj.iter()
                 .map(|(o, (u, v))| {
                     let p = camera.project(camera.project_world(&points[*o]));
-                    (p.x - u).abs() + (p.y - v).abs()
-                })
-                .sum::<f64>()
-        })
-        .sum()
-}
-
-pub fn total_reprojection_error_l2(
-    vis_graph: &Vec<Vec<(usize, (f64, f64))>>,
-    cameras: &Vec<Camera>,
-    points: &Vec<Point3<f64>>,
-) -> f64 {
-    cameras
-        .par_iter()
-        .zip(vis_graph)
-        .map(|(camera, adj)| {
-            adj.iter()
-                .map(|(o, (u, v))| {
-                    let p = camera.project(camera.project_world(&points[*o]));
-                    (p.x - u).powf(2.0) + (p.y - v).powf(2.0)
+                    (p.x - u).abs().powf(norm) + (p.y - v).abs().powf(norm)
                 })
                 .sum::<f64>()
         })
         .sum::<f64>()
-        .sqrt()
-        * 2.0
+        .powf(1./norm)
 }
 
+/// Bundle adjustment problem composed of cameras, points, and observations of points by cameras.
 #[derive(Debug, Clone)]
-pub struct BALProblem {
+pub struct BAProblem {
     pub cameras: Vec<Camera>,
     pub points: Vec<Point3<f64>>,
     pub vis_graph: Vec<Vec<(usize, (f64, f64))>>,
 }
 
-impl BALProblem {
-    pub fn total_reprojection_error(&self) -> f64 {
-        total_reprojection_error(&self.vis_graph, &self.cameras, &self.points)
-    }
-
-    pub fn total_reprojection_error_l2(&self) -> f64 {
-        total_reprojection_error_l2(&self.vis_graph, &self.cameras, &self.points)
+impl BAProblem {
+    /// Amount of reprojection error in the problem. Computed as the `norm`-norm of the difference
+    /// of all observed points from their projection.
+    pub fn total_reprojection_error(&self, norm: f64) -> f64 {
+        total_reprojection_error(&self.vis_graph, &self.cameras, &self.points, norm)
     }
 
     pub fn mean(&self) -> Vector3<f64> {
@@ -274,15 +254,15 @@ impl BALProblem {
             vis_graph[cam_i].push((p_i, (obs_x, obs_y)));
         }
 
-        BALProblem {
+        BAProblem {
             cameras: cams,
             points: points,
             vis_graph: vis_graph,
         }
     }
 
-    pub fn from_file_text(filepath: &Path) -> Result<BALProblem, Error> {
-        fn parse_internal(input: &str) -> IResult<&str, BALProblem, VerboseError<&str>> {
+    pub fn from_file_text(filepath: &Path) -> Result<BAProblem, Error> {
+        fn parse_internal(input: &str) -> IResult<&str, BAProblem, VerboseError<&str>> {
             fn unsigned(input: &str) -> IResult<&str, usize, VerboseError<&str>> {
                 nom::combinator::map_res(digit1, usize::from_str)(input)
             }
@@ -313,7 +293,7 @@ impl BALProblem {
             });
             let (input, points) = count(point, num_points)(input)?;
 
-            Ok((input, BALProblem::new(cameras, points, observations)))
+            Ok((input, BAProblem::new(cameras, points, observations)))
         }
 
         let mut file = File::open(filepath)?;
@@ -329,8 +309,8 @@ impl BALProblem {
             })
     }
 
-    pub fn from_file_binary(filepath: &Path) -> Result<BALProblem, Error> {
-        fn parse_internal(input: &[u8]) -> IResult<&[u8], BALProblem, VerboseError<&[u8]>> {
+    pub fn from_file_binary(filepath: &Path) -> Result<BAProblem, Error> {
+        fn parse_internal(input: &[u8]) -> IResult<&[u8], BAProblem, VerboseError<&[u8]>> {
             let (input, num_cameras) = be_u64(input)?;
             let (input, num_points) = be_u64(input)?;
             let (input, _num_observations) = be_u64(input)?;
@@ -368,7 +348,7 @@ impl BALProblem {
 
             Ok((
                 input,
-                BALProblem {
+                BAProblem {
                     cameras: cameras,
                     points: points,
                     vis_graph: observations,
@@ -390,7 +370,7 @@ impl BALProblem {
             })
     }
 
-    pub fn from_file(path: &Path) -> Result<BALProblem, Error> {
+    pub fn from_file(path: &Path) -> Result<BAProblem, Error> {
         match path.extension().unwrap().to_str().unwrap() {
             "bal" => Self::from_file_text(path),
             "bbal" => Self::from_file_binary(path),
@@ -416,7 +396,7 @@ impl BALProblem {
     pub fn verify(&self) {
         if self.vis_graph.len() > self.num_cameras() {
             println!(
-                "Have more observations than camears. {} vs {}.",
+                "Have more observations than cameras. {} vs {}.",
                 self.vis_graph.len(),
                 self.num_cameras()
             );
@@ -462,7 +442,7 @@ impl BALProblem {
             })
             .collect::<Vec<_>>();
 
-        BALProblem {
+        BAProblem {
             cameras: cameras,
             points: points,
             vis_graph: obs,
@@ -569,7 +549,7 @@ impl BALProblem {
             })
             .collect();
 
-        BALProblem {
+        BAProblem {
             cameras: cameras,
             points: points,
             vis_graph: vis_graph,
@@ -647,6 +627,8 @@ impl BALProblem {
         Ok(())
     }
 
+    /// Write BAProblem to a file in BAL format. Text or binary format is automatically chosen from
+    /// the filename extension. `.bal` -> text, `.bbal` -> binary.
     pub fn write(&self, path: &std::path::Path) -> Result<(), std::io::Error> {
         match path.extension().unwrap().to_str().unwrap() {
             "bal" => self.write_text(path),
@@ -656,5 +638,11 @@ impl BALProblem {
                 format!("unknown file extension {}", ext),
             )),
         }
+    }
+}
+
+impl std::fmt::Display for BAProblem {
+ fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Bundle Adjustment Problem with {} cameras, {} points, and {} observations)", self.num_cameras(), self.num_points(), self.num_observations())
     }
 }

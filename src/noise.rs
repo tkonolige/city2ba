@@ -28,7 +28,7 @@ fn unit_random() -> Vector3<f64> {
 }
 
 // TODO: add twisting to the noise
-pub fn add_drift(bal: BALProblem, strength: f64, angle_strength: f64, std: f64) -> BALProblem {
+pub fn add_drift(bal: BAProblem, strength: f64, angle_strength: f64, std: f64) -> BAProblem {
     // Choose the drift direction to be in line with the largest standard deviation.
     let dir = bal.std().normalize();
 
@@ -73,7 +73,7 @@ pub fn add_drift(bal: BALProblem, strength: f64, angle_strength: f64, std: f64) 
 
     let points = bal.points.iter().map(|p| p + drift_noise(*p)).collect();
 
-    BALProblem {
+    BAProblem {
         cameras: cameras,
         points: points,
         vis_graph: bal.vis_graph,
@@ -81,13 +81,13 @@ pub fn add_drift(bal: BALProblem, strength: f64, angle_strength: f64, std: f64) 
 }
 
 pub fn add_noise(
-    bal: BALProblem,
+    bal: BAProblem,
     translation_std: f64,
     rotation_std: f64,
     intrinsics_std: f64,
     point_std: f64,
     observations_std: f64,
-) -> BALProblem {
+) -> BAProblem {
     let n_translation = Normal::new(0.0, translation_std.into());
     let n_rotation = Normal::new(0.0, rotation_std.into());
     let n_intrinsics = Normal::new(0.0, intrinsics_std.into());
@@ -133,7 +133,7 @@ pub fn add_noise(
         })
         .collect();
 
-    BALProblem {
+    BAProblem {
         cameras: cameras,
         points: points,
         vis_graph: observations,
@@ -141,7 +141,7 @@ pub fn add_noise(
 }
 
 /// Add incorrect correspondences by swapping two nearby observations.
-pub fn add_incorrect_correspondences(bal: BALProblem, mismatch_chance: f64) -> BALProblem {
+pub fn add_incorrect_correspondences(bal: BAProblem, mismatch_chance: f64) -> BAProblem {
     let observations = bal
         .vis_graph
         .into_iter()
@@ -179,14 +179,14 @@ pub fn add_incorrect_correspondences(bal: BALProblem, mismatch_chance: f64) -> B
         })
         .collect();
 
-    BALProblem {
+    BAProblem {
         cameras: bal.cameras,
         points: bal.points,
         vis_graph: observations,
     }
 }
 
-pub fn drop_features(bal: BALProblem, drop_percent: f64) -> BALProblem {
+pub fn drop_features(bal: BAProblem, drop_percent: f64) -> BAProblem {
     let mut rng = thread_rng();
     let observations = bal
         .vis_graph
@@ -199,14 +199,14 @@ pub fn drop_features(bal: BALProblem, drop_percent: f64) -> BALProblem {
             o
         })
         .collect::<Vec<_>>();
-    BALProblem {
+    BAProblem {
         cameras: bal.cameras,
         points: bal.points,
         vis_graph: observations,
     }
 }
 
-pub fn split_landmarks(bal: BALProblem, split_percent: f64) -> BALProblem {
+pub fn split_landmarks(bal: BAProblem, split_percent: f64) -> BAProblem {
     let mut rng = thread_rng();
     // select which landmarks to split in two
     let l = bal.points.len();
@@ -232,7 +232,7 @@ pub fn split_landmarks(bal: BALProblem, split_percent: f64) -> BALProblem {
         }
     }
 
-    BALProblem {
+    BAProblem {
         cameras: bal.cameras,
         points: points,
         vis_graph: observations,
@@ -270,7 +270,7 @@ impl rstar::Point for IndexedVector3 {
     }
 }
 
-pub fn join_landmarks(bal: BALProblem, join_percent: f64) -> BALProblem {
+pub fn join_landmarks(bal: BAProblem, join_percent: f64) -> BAProblem {
     let observations = {
         let rtree = RTree::bulk_load(
             bal.points
@@ -320,7 +320,7 @@ pub fn join_landmarks(bal: BALProblem, join_percent: f64) -> BALProblem {
         observations
     };
 
-    BALProblem {
+    BAProblem {
         cameras: bal.cameras,
         points: bal.points,
         vis_graph: observations,
