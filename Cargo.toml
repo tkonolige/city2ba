@@ -7,18 +7,17 @@ edition = "2018"
 
 [dependencies]
 tobj = {git = "https://github.com/tkonolige/tobj.git"}
-cgmath = "*"
+cgmath = "0.17"
 structopt = "*"
 rand = "0.6"
 ply-rs = "*"
-poisson = {git = "https://github.com/WaDelma/poisson.git"}
+poisson = "0.10"
 nalgebra = "0.17"
 itertools = "*"
-embree-rs = {git = "https://github.com/tkonolige/embree-rs.git"}
-# embree-rs = {path = "/Users/tristan/Sync/Research/bundle_adjustment/embree-rs"}
-rayon = "*"
-nom = "5.0.0-beta2"
+embree-rs = "*"
+rayon = "1"
+nom = "5"
 indicatif = {git = "https://github.com/mitsuhiko/indicatif.git", features=["with_rayon"]}
 disjoint-sets = "*"
-byteorder = "*"
+byteorder = "1"
 rstar = "*"

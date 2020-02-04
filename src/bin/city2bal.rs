@@ -31,14 +31,14 @@ struct Opt {
     #[structopt(
         long = "intrinsics-start",
         default_value = "1,0,0",
-        parse(try_from_str = "parse_vec3")
+        parse(try_from_str = parse_vec3)
     )]
     intrinsics_start: Vector3<f64>,
 
     #[structopt(
         long = "intrinsics-end",
         default_value = "1,0,0",
-        parse(try_from_str = "parse_vec3")
+        parse(try_from_str = parse_vec3)
     )]
     intrinsics_end: Vector3<f64>,
 
