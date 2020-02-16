@@ -28,8 +28,8 @@ use std::str::FromStr;
 
 use disjoint_sets::*;
 
-use itertools::Itertools;
 use byteorder::*;
+use itertools::Itertools;
 
 #[derive(Debug)]
 pub enum Error {
@@ -203,7 +203,7 @@ fn total_reprojection_error(
                 .sum::<f64>()
         })
         .sum::<f64>()
-        .powf(1./norm)
+        .powf(1. / norm)
 }
 
 /// Bundle adjustment problem composed of cameras, points, and observations of points by cameras.
@@ -251,6 +251,8 @@ impl BAProblem {
     ) -> Self {
         let mut vis_graph = vec![Vec::new(); cams.len()];
         for (cam_i, p_i, obs_x, obs_y) in obs {
+            assert!(cam_i < cams.len());
+            assert!(p_i < points.len());
             vis_graph[cam_i].push((p_i, (obs_x, obs_y)));
         }
 
@@ -258,6 +260,24 @@ impl BAProblem {
             cameras: cams,
             points: points,
             vis_graph: vis_graph,
+        }
+    }
+
+    pub fn from_visibility(
+        cams: Vec<Camera>,
+        points: Vec<Point3<f64>>,
+        obs: Vec<Vec<(usize, (f64, f64))>>,
+    ) -> Self {
+        assert!(cams.len() == obs.len());
+        for o in &obs {
+            for (ci, _) in o {
+                assert!(ci < &points.len());
+            }
+        }
+        BAProblem {
+            cameras: cams,
+            points: points,
+            vis_graph: obs,
         }
     }
 
@@ -642,7 +662,13 @@ impl BAProblem {
 }
 
 impl std::fmt::Display for BAProblem {
- fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Bundle Adjustment Problem with {} cameras, {} points, and {} observations)", self.num_cameras(), self.num_points(), self.num_observations())
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Bundle Adjustment Problem with {} cameras, {} points, and {} observations",
+            self.num_cameras(),
+            self.num_points(),
+            self.num_observations()
+        )
     }
 }

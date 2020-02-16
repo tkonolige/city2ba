@@ -21,3 +21,5 @@ indicatif = {git = "https://github.com/mitsuhiko/indicatif.git", features=["with
 disjoint-sets = "*"
 byteorder = "1"
 rstar = "*"
+line_intersection = "0.4"
+geo = "*"

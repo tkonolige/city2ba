@@ -18,14 +18,17 @@ use indicatif::{ParallelProgressIterator, ProgressBar, ProgressStyle};
 
 use std::convert::TryInto;
 
+use crate::baproblem::*;
 use cgmath::prelude::*;
 use cgmath::{Basis3, ElementWise, InnerSpace, Point3, Vector3, Vector4};
 use rayon::prelude::*;
 use rstar::RTree;
-use crate::baproblem::*;
 
 /// Convert a 3D model into geometry for fast intersection tests.
-pub fn model2geometry<'a>(model: &tobj::Model, dev: &'a embree_rs::Device) -> embree_rs::Geometry<'a> {
+pub fn model2geometry<'a>(
+    model: &tobj::Model,
+    dev: &'a embree_rs::Device,
+) -> embree_rs::Geometry<'a> {
     let num_tri = model.mesh.indices.len() / 3;
     let num_vert = model.mesh.positions.len() / 3;
     let mut mesh = embree_rs::TriangleMesh::unanimated(dev, num_tri, num_vert);
@@ -134,7 +137,11 @@ pub fn generate_cameras_path_step(
         num_cameras as f64 * step_size
     );
 
-    println!("Generating cameras along path. Path length: {}, using {} of it.", total_length, num_cameras as f64 * step_size);
+    println!(
+        "Generating cameras along path. Path length: {}, using {} of it.",
+        total_length,
+        num_cameras as f64 * step_size
+    );
 
     let mut segment_index = 0;
     let mut dist = 0.0;
@@ -371,7 +378,7 @@ pub fn visibility_graph(
                     let p = camera.project(p_camera);
 
                     // check point is in camera frame
-                    if p.x >= -1.0 && p.x <= 1.0 && p.y >= -1.0 && p.y < 1.0 {
+                    if p.x >= -1.0 && p.x <= 1.0 && p.y >= -1.0 && p.y <= 1.0 {
                         // ray pointing from camera towards the point
                         let dir = point - camera.center();
                         let mut ray = embree_rs::Ray::new(
