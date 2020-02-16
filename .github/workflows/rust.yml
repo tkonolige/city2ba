@@ -14,7 +14,10 @@ jobs:
     steps:
     - uses: actions/checkout@v2
     - name: Dependencies
-      run: sudo apt-get install
+      run: |
+        curl -O -J -L https://github.com/embree/embree/releases/download/v3.8.0/embree-3.8.0.x86_64.linux.tar.gz
+        tar xvf embree-3.8.0.x86_64.linux.tar.gz
+        sudo cp embree-3.8.0.x86_64.linux/lib/* /usr/lib/
     - name: Build
       run: cargo build --verbose
     - name: Run tests
