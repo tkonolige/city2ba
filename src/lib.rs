@@ -1,14 +1,11 @@
+//! Tools for generating synthetic bundle adjustment datasets.
+
 #[macro_use]
 extern crate itertools;
 
 mod baproblem;
-mod generate;
-mod noise;
-mod synthetic;
+pub mod generate;
+pub mod noise;
+pub mod synthetic;
 
 pub use baproblem::*;
-pub use generate::*;
-pub use noise::*;
-pub use synthetic::*;
-
-pub use cgmath::Vector3;

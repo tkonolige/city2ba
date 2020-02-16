@@ -121,11 +121,10 @@ fn main() -> Result<(), std::io::Error> {
         models = move_to_origin(models);
     };
 
-    // create embree device
     let dev = embree_rs::Device::new();
     let mut scene = embree_rs::Scene::new(&dev);
     for model in models.iter() {
-        let mesh = model2geometry(model, &dev);
+        let mesh = model_to_geometry(model, &dev);
         scene.attach_geometry(mesh);
     }
     let cscene = scene.commit();

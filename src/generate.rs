@@ -1,3 +1,5 @@
+//! Functions to generate camera and point locations on a model.
+
 extern crate cgmath;
 extern crate embree_rs;
 extern crate indicatif;
@@ -25,7 +27,7 @@ use rayon::prelude::*;
 use rstar::RTree;
 
 /// Convert a 3D model into geometry for fast intersection tests.
-pub fn model2geometry<'a>(
+pub fn model_to_geometry<'a>(
     model: &tobj::Model,
     dev: &'a embree_rs::Device,
 ) -> embree_rs::Geometry<'a> {

@@ -1,3 +1,5 @@
+//! Functions for generating cameras and points without reference geometry
+
 extern crate cgmath;
 extern crate geo;
 extern crate indicatif;
@@ -17,7 +19,7 @@ use std::convert::TryInto;
 use crate::baproblem::*;
 
 #[derive(Debug, Clone, PartialEq, Copy)]
-pub struct WrappedPoint(Point3<f64>, usize);
+struct WrappedPoint(Point3<f64>, usize);
 
 impl rstar::Point for WrappedPoint {
     type Scalar = f64;
@@ -123,15 +125,7 @@ fn hits_building(c: Point3<f64>, p: Point3<f64>, block_length: f64, block_inset:
     .any(|x| x)
 }
 
-/// Generate a synthetic scene of buildings on a grid
-///
-///   +-------+ +-------+
-///  * * * * * * * * * * *
-/// +*+-------+*+-------+*+
-/// |*|       |*|       |*|
-/// +*+-------+*+-------+*+
-///  * * * * * * * * * * *
-///   +-------+ +-------+
+/// Generate a synthetic scene of buildings on a grid.
 pub fn synthetic_grid(
     num_cameras_per_block: usize,
     num_points_per_block: usize,

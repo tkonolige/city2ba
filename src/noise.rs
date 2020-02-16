@@ -1,3 +1,4 @@
+//! Functions for adding noise to bundle adjustment problems.
 extern crate rand;
 use rand::distributions::{Distribution, Normal, WeightedIndex};
 use rand::prelude::*;
