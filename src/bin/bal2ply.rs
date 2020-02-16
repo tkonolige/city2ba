@@ -9,7 +9,7 @@ use ply_rs::writer::Writer;
 
 use structopt::StructOpt;
 
-use city2bal::*;
+use city2ba::*;
 
 use cgmath::Point3;
 
@@ -113,7 +113,7 @@ fn write_cameras(
     writer.write_ply(&mut file, &mut ply).map(|_| ())
 }
 
-fn main() -> std::result::Result<(), city2bal::Error> {
+fn main() -> std::result::Result<(), city2ba::Error> {
     let opt = Opt::from_args();
     let bal = BAProblem::from_file(&opt.input)?;
     write_cameras(&opt.out, &bal.cameras, &bal.points, &bal.vis_graph)?;

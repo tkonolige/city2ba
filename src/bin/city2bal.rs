@@ -1,4 +1,4 @@
-extern crate city2bal;
+extern crate city2ba;
 extern crate itertools;
 extern crate nalgebra as na;
 extern crate rand;
@@ -9,7 +9,7 @@ use structopt::StructOpt;
 
 use std::str::FromStr;
 
-use city2bal::*;
+use city2ba::*;
 
 // helper to parse Vector3 with structopt
 fn parse_vec3(s: &str) -> Result<Vector3<f64>, std::num::ParseFloatError> {
@@ -22,7 +22,7 @@ fn parse_vec3(s: &str) -> Result<Vector3<f64>, std::num::ParseFloatError> {
 
 #[derive(StructOpt, Debug)]
 #[structopt(
-    name = "city2bal",
+    name = "city2ba",
     about = "Generate a bundle adjustment problem from an .obj file."
 )]
 struct Opt {

@@ -1,9 +1,9 @@
-extern crate city2bal;
+extern crate city2ba;
 extern crate structopt;
 
 use structopt::StructOpt;
 
-use city2bal::*;
+use city2ba::*;
 
 #[derive(StructOpt, Debug)]
 #[structopt(

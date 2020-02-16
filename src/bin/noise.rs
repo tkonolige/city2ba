@@ -1,8 +1,8 @@
 extern crate structopt;
 use structopt::StructOpt;
 
-extern crate city2bal;
-use city2bal::*;
+extern crate city2ba;
+use city2ba::*;
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "noise", about = "Tool to add noise/error to a BA problem")]

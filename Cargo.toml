@@ -1,5 +1,5 @@
 [package]
-name = "city2bal"
+name = "city2ba"
 version = "0.1.0"
 authors = ["Tristan Konolige <tristan.konolige@gmail.com>"]
 build = "build.rs"

@@ -61,7 +61,7 @@ fn noise_blocks() -> Result<(), Box<dyn std::error::Error>> {
 fn from_box_path() -> Result<(), Box<dyn std::error::Error>> {
     let dir = tempdir()?;
 
-    let mut cmd = Command::cargo_bin("city2bal")?;
+    let mut cmd = Command::cargo_bin("city2ba")?;
     cmd.arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/box.obj"))
         .arg(dir.path().join("box.bal"))
         .arg("--cameras")
@@ -81,7 +81,7 @@ fn from_box_path() -> Result<(), Box<dyn std::error::Error>> {
 fn from_box_path_step() -> Result<(), Box<dyn std::error::Error>> {
     let dir = tempdir()?;
 
-    let mut cmd = Command::cargo_bin("city2bal")?;
+    let mut cmd = Command::cargo_bin("city2ba")?;
     cmd.arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/box.obj"))
         .arg(dir.path().join("box.bal"))
         .arg("--cameras")
@@ -103,7 +103,7 @@ fn from_box_path_step() -> Result<(), Box<dyn std::error::Error>> {
 fn from_box_path_ground() -> Result<(), Box<dyn std::error::Error>> {
     let dir = tempdir()?;
 
-    let mut cmd = Command::cargo_bin("city2bal")?;
+    let mut cmd = Command::cargo_bin("city2ba")?;
     cmd.arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/box.obj"))
         .arg(dir.path().join("box.bal"))
         .arg("--cameras")
