@@ -152,7 +152,7 @@ dependencies = [
 
 [[package]]
 name = "city2ba"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "assert_cmd 0.12.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "byteorder 1.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
