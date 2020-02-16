@@ -17,6 +17,7 @@ use rstar::RTree;
 
 use std::collections::HashMap;
 use std::iter::FromIterator;
+
 fn unit_random() -> Vector3<f64> {
     let r = Normal::new(0.0, 1.0);
     Vector3::new(
@@ -27,8 +28,16 @@ fn unit_random() -> Vector3<f64> {
     .normalize()
 }
 
-// TODO: add twisting to the noise
+/// Add drift-like noise to the problem. Each camera is transformed like so:
+/// d = ||-(R^T t)||
+/// R' = rotation_around_x(strength * gamma * d^1.2) * R
+/// t' = strength * d^2 * gamma * dir + t
+/// p' = strength * d^2 * gamma * dir + p
+/// where
+/// dir is the direction of standard deviation of the problem and gamma is a normal random variable
+/// with standard deviation of std.
 pub fn add_drift(bal: BAProblem, strength: f64, angle_strength: f64, std: f64) -> BAProblem {
+    // TODO: add twisting to the noise
     // Choose the drift direction to be in line with the largest standard deviation.
     let dir = bal.std().normalize();
 
@@ -80,6 +89,7 @@ pub fn add_drift(bal: BAProblem, strength: f64, angle_strength: f64, std: f64) -
     }
 }
 
+/// Add Gaussian noise to a problem.
 pub fn add_noise(
     bal: BAProblem,
     translation_std: f64,
@@ -186,6 +196,7 @@ pub fn add_incorrect_correspondences(bal: BAProblem, mismatch_chance: f64) -> BA
     }
 }
 
+/// Drop camera-point observations.
 pub fn drop_features(bal: BAProblem, drop_percent: f64) -> BAProblem {
     let mut rng = thread_rng();
     let observations = bal
@@ -206,6 +217,8 @@ pub fn drop_features(bal: BAProblem, drop_percent: f64) -> BAProblem {
     }
 }
 
+/// Split landmarks into two different landmarks at the same location. Observations as split
+/// randomly between the new landmarks.
 pub fn split_landmarks(bal: BAProblem, split_percent: f64) -> BAProblem {
     let mut rng = thread_rng();
     // select which landmarks to split in two
@@ -239,6 +252,7 @@ pub fn split_landmarks(bal: BAProblem, split_percent: f64) -> BAProblem {
     }
 }
 
+// wrapper to store points in the rtree
 #[derive(Debug, PartialEq, Clone, Copy)]
 struct IndexedVector3 {
     id: usize,
@@ -270,6 +284,7 @@ impl rstar::Point for IndexedVector3 {
     }
 }
 
+/// Randomly join two landmarks into a single one for some camera observations.
 pub fn join_landmarks(bal: BAProblem, join_percent: f64) -> BAProblem {
     let observations = {
         let rtree = RTree::bulk_load(

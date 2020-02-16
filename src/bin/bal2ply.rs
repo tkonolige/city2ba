@@ -17,22 +17,27 @@ use std::fs::File;
 use std::io::BufWriter;
 
 #[derive(StructOpt, Debug)]
-#[structopt(name = "basic")]
+#[structopt(
+    name = "bal2ply",
+    about = "Convert a bundle adjustment problem to .ply suitable for using with meshlab"
+)]
 struct Opt {
+    /// Input bundle adjustment file in .bal or .bbal format.
     #[structopt(name = "FILE", parse(from_os_str))]
     input: std::path::PathBuf,
 
+    /// Output file in .ply format.
     #[structopt(name = "OUT", parse(from_os_str))]
     out: std::path::PathBuf,
 }
 
-/// Write camera locations out to a ply file. Does not provide color or orientation.
+/// Write camera locations out to a ply file. Cameras are red, points are green.
 fn write_cameras(
     path: &std::path::Path,
     cameras: &Vec<Camera>,
     points: &Vec<Point3<f64>>,
     observations: &Vec<Vec<(usize, (f64, f64))>>,
-    ) -> Result<(), std::io::Error> {
+) -> Result<(), std::io::Error> {
     let mut ply = Ply::<DefaultElement>::new();
     let mut point_element = ElementDef::new("vertex".to_string());
     let p = PropertyDef::new("x".to_string(), PropertyType::Scalar(ScalarType::Float));
@@ -49,10 +54,15 @@ fn write_cameras(
     point_element.properties.add(p);
     ply.header.elements.add(point_element);
     let mut edge_element = ElementDef::new("edge".to_string());
-    edge_element.properties.add(PropertyDef::new("vertex1".to_string(), PropertyType::Scalar(ScalarType::Int)));
-    edge_element.properties.add(PropertyDef::new("vertex2".to_string(), PropertyType::Scalar(ScalarType::Int)));
+    edge_element.properties.add(PropertyDef::new(
+        "vertex1".to_string(),
+        PropertyType::Scalar(ScalarType::Int),
+    ));
+    edge_element.properties.add(PropertyDef::new(
+        "vertex2".to_string(),
+        PropertyType::Scalar(ScalarType::Int),
+    ));
     ply.header.elements.add(edge_element);
-
 
     // Add first point
     let mut cs: Vec<_> = cameras
@@ -81,12 +91,21 @@ fn write_cameras(
     cs.extend(pts);
     ply.payload.insert("vertex".to_string(), cs);
 
-    let edges = observations.iter().enumerate().flat_map(|(ci, obs)| obs.iter().map(move |(pi, _)| {
-        let mut e = DefaultElement::new();
-        e.insert("vertex1".to_string(), Property::Int(ci as i32));
-        e.insert("vertex2".to_string(), Property::Int((*pi + cameras.len()) as i32));
-        e
-    })).collect();
+    let edges = observations
+        .iter()
+        .enumerate()
+        .flat_map(|(ci, obs)| {
+            obs.iter().map(move |(pi, _)| {
+                let mut e = DefaultElement::new();
+                e.insert("vertex1".to_string(), Property::Int(ci as i32));
+                e.insert(
+                    "vertex2".to_string(),
+                    Property::Int((*pi + cameras.len()) as i32),
+                );
+                e
+            })
+        })
+        .collect();
     ply.payload.insert("edge".to_string(), edges);
 
     let mut file = BufWriter::new(File::create(path)?);
@@ -96,9 +115,7 @@ fn write_cameras(
 
 fn main() -> std::result::Result<(), city2bal::Error> {
     let opt = Opt::from_args();
-
     let bal = BAProblem::from_file(&opt.input)?;
-
     write_cameras(&opt.out, &bal.cameras, &bal.points, &bal.vis_graph)?;
 
     Ok(())

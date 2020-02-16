@@ -1,18 +1,18 @@
 extern crate cgmath;
+extern crate geo;
 extern crate indicatif;
+extern crate line_intersection;
 extern crate rayon;
 extern crate rstar;
-extern crate line_intersection;
-extern crate geo;
 
 use cgmath::prelude::*;
 use cgmath::{Basis3, Point3, Vector3};
+use geo::Line;
 use indicatif::{ParallelProgressIterator, ProgressBar, ProgressStyle};
+use line_intersection::LineInterval;
 use rayon::prelude::*;
 use rstar::RTree;
 use std::convert::TryInto;
-use line_intersection::LineInterval;
-use geo::Line;
 
 use crate::baproblem::*;
 
@@ -64,7 +64,7 @@ fn hits_in_block(
         ),
         (
             (offset_x + block_inset, offset_y + block_inset),
-            (offset_x + block_end,   offset_y + block_inset),
+            (offset_x + block_end, offset_y + block_inset),
         ),
         (
             (offset_x + block_end, offset_y + block_inset),
@@ -72,7 +72,7 @@ fn hits_in_block(
         ),
         (
             (offset_x + block_inset, offset_y + block_end),
-            (offset_x + block_end,   offset_y + block_end),
+            (offset_x + block_end, offset_y + block_end),
         ),
     ];
     sides
@@ -90,10 +90,8 @@ fn hits_in_block(
 
             match view_segment.relate(&side_segment).unique_intersection() {
                 // make sure we didn't hit the end point
-                Some(p) => {
-                    ((end.0 - p.x()).powf(2.) + (end.1 - p.y())).sqrt() > 1e-8
-                },
-                None => false
+                Some(p) => ((end.0 - p.x()).powf(2.) + (end.1 - p.y())).sqrt() > 1e-8,
+                None => false,
             }
         })
         .any(|x| x)
@@ -221,9 +219,10 @@ pub fn synthetic_grid(
         .progress_with(pb)
         .map(|camera| {
             let mut obs = Vec::new();
-            for p in rtree
-                .locate_within_distance(WrappedPoint(camera.center(), std::usize::MAX), max_dist * max_dist)
-            {
+            for p in rtree.locate_within_distance(
+                WrappedPoint(camera.center(), std::usize::MAX),
+                max_dist * max_dist,
+            ) {
                 let WrappedPoint(point, pi) = p;
 
                 // check if point crosses any building

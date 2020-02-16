@@ -43,6 +43,7 @@ impl From<std::io::Error> for Error {
     }
 }
 
+/// Convert Rodrigues vector to a rotation.
 fn from_rodrigues(x: Vector3<f64>) -> Basis3<f64> {
     let theta2 = x.dot(x);
     if theta2 > cgmath::Rad::<f64>::default_epsilon() {
@@ -57,6 +58,7 @@ fn from_rodrigues(x: Vector3<f64>) -> Basis3<f64> {
     }
 }
 
+/// Convert rotation to Rodrigues vector.
 fn to_rodrigues(x: Basis3<f64>) -> Vector3<f64> {
     let q = Quaternion::from(x);
     let angle = 2.0 * q.s.acos();
@@ -64,7 +66,7 @@ fn to_rodrigues(x: Basis3<f64>) -> Vector3<f64> {
     axis.normalize() * angle
 }
 
-/// Camera expressed as Rx+t with intrinsics
+/// Camera expressed as Rx+t with intrinsics.
 /// The camera points down the negative z axis. Up is the positive y axis.
 #[derive(Debug, Clone)]
 pub struct Camera {
@@ -88,6 +90,7 @@ impl Camera {
         Point2::from_vec(self.focal_length() * r * p_)
     }
 
+    /// Parse a camera from a vector of parameters. Order is R, t, intrinsics.
     pub fn from_vec(x: Vec<f64>) -> Self {
         Camera {
             dir: from_rodrigues(Vector3::new(x[0], x[1], x[2])),
@@ -96,6 +99,7 @@ impl Camera {
         }
     }
 
+    /// Convert a camera to a vector of parameters. Order is R, t, intrinsics.
     pub fn to_vec(&self) -> Vec<f64> {
         let r = to_rodrigues(self.dir);
         vec![
@@ -111,6 +115,7 @@ impl Camera {
         ]
     }
 
+    /// Create a camera from a position and direction.
     pub fn from_position_direction(
         position: Point3<f64>,
         dir: Basis3<f64>,
@@ -123,6 +128,7 @@ impl Camera {
         }
     }
 
+    /// Center of the camera. -(R^T t).
     pub fn center(&self) -> Point3<f64> {
         Point3::from_vec(-(self.dir.invert().rotate_vector(self.loc)))
     }
@@ -139,6 +145,7 @@ impl Camera {
         (self.intrin[1], self.intrin[2])
     }
 
+    /// Transform a camera with a rotation, translation, and intrinsics modification.
     pub fn transform(
         &self,
         delta_dir: Basis3<f64>,
@@ -156,6 +163,7 @@ impl Camera {
         }
     }
 
+    /// Project a point into this cameras frame of reference.
     pub fn to_world(&self, p: Point3<f64>) -> Point3<f64> {
         self.dir.invert().rotate_point(p - self.loc)
     }
@@ -185,27 +193,6 @@ fn test_project_isomorphic() {
     assert!(c.to_world(c.project_world(&p)).abs_diff_eq(&p, 1e-8));
 }
 
-fn total_reprojection_error(
-    vis_graph: &Vec<Vec<(usize, (f64, f64))>>,
-    cameras: &Vec<Camera>,
-    points: &Vec<Point3<f64>>,
-    norm: f64,
-) -> f64 {
-    cameras
-        .par_iter()
-        .zip(vis_graph)
-        .map(|(camera, adj)| {
-            adj.iter()
-                .map(|(o, (u, v))| {
-                    let p = camera.project(camera.project_world(&points[*o]));
-                    (p.x - u).abs().powf(norm) + (p.y - v).abs().powf(norm)
-                })
-                .sum::<f64>()
-        })
-        .sum::<f64>()
-        .powf(1. / norm)
-}
-
 /// Bundle adjustment problem composed of cameras, points, and observations of points by cameras.
 #[derive(Debug, Clone)]
 pub struct BAProblem {
@@ -218,9 +205,22 @@ impl BAProblem {
     /// Amount of reprojection error in the problem. Computed as the `norm`-norm of the difference
     /// of all observed points from their projection.
     pub fn total_reprojection_error(&self, norm: f64) -> f64 {
-        total_reprojection_error(&self.vis_graph, &self.cameras, &self.points, norm)
+        self.cameras
+            .par_iter()
+            .zip(&self.vis_graph)
+            .map(|(camera, adj)| {
+                adj.iter()
+                    .map(|(o, (u, v))| {
+                        let p = camera.project(camera.project_world(&self.points[*o]));
+                        (p.x - u).abs().powf(norm) + (p.y - v).abs().powf(norm)
+                    })
+                    .sum::<f64>()
+            })
+            .sum::<f64>()
+            .powf(1. / norm)
     }
 
+    /// Center of mass of cameras and points.
     pub fn mean(&self) -> Vector3<f64> {
         let num = (self.cameras.len() + self.points.len()) as f64;
         self.cameras
@@ -230,6 +230,7 @@ impl BAProblem {
             .fold(Vector3::new(0.0, 0.0, 0.0), |a, b| a + b.to_vec() / num)
     }
 
+    /// Standard deviation of cameras and points from the center of mass.
     pub fn std(&self) -> Vector3<f64> {
         let num = (self.cameras.len() + self.points.len()) as f64;
         let mean = self.mean();
@@ -244,6 +245,38 @@ impl BAProblem {
             .map(|x| x.sqrt())
     }
 
+    /// Smallest and largest coordinates of the problem.
+    pub fn extent(&self) -> (Vector3<f64>, Vector3<f64>) {
+        let min = self
+            .cameras
+            .iter()
+            .map(|x| x.center().clone())
+            .chain(self.points.clone().into_iter())
+            .fold(
+                Vector3::new(std::f64::INFINITY, std::f64::INFINITY, std::f64::INFINITY),
+                |x, y| Vector3::new(x.x.min(y.x), x.y.min(y.y), x.z.min(y.z)),
+            );
+        let max = self
+            .cameras
+            .iter()
+            .map(|x| x.center().clone())
+            .chain(self.points.clone().into_iter())
+            .fold(
+                Vector3::new(std::f64::INFINITY, std::f64::INFINITY, std::f64::INFINITY),
+                |x, y| Vector3::new(x.x.min(y.x), x.y.min(y.y), x.z.min(y.z)),
+            );
+        (min, max)
+    }
+
+    /// Dimensions in x,y,z of the problem.
+    pub fn dimensions(&self) -> Vector3<f64> {
+        let (min, max) = self.extent();
+        max - min
+    }
+
+    /// Create a new bundle adjustment problem from a set a cameras, points, and observations.
+    /// Observations are a tuple of camera index, point index, u, v where the camera sees the point
+    /// at u,v.
     pub fn new(
         cams: Vec<Camera>,
         points: Vec<Point3<f64>>,
@@ -263,6 +296,9 @@ impl BAProblem {
         }
     }
 
+    /// Create a new bundle adjustment problem from a set a cameras, points, and observations.
+    /// Observations are a vector containing vectors of the points seen by the camera at the
+    /// respective index.
     pub fn from_visibility(
         cams: Vec<Camera>,
         points: Vec<Point3<f64>>,
@@ -281,6 +317,30 @@ impl BAProblem {
         }
     }
 
+    /// Parse a bundle adjustment problem from a file in the Bundle Adjustment in the Large text
+    /// file format.
+    ///
+    /// <num_cameras> <num_points> <num_observations>
+    /// <camera_index_1> <point_index_1> <x_1> <y_1>
+    /// ...
+    /// <camera_index_num_observations> <point_index_num_observations> <x_num_observations> <y_num_observations>
+    /// <camera_1>
+    /// ...
+    /// <camera_num_cameras>
+    /// <point_1>
+    /// ...
+    /// <point_num_points>
+    ///
+    /// where cameras are:
+    /// <R_1>
+    /// <R_2>
+    /// <R_3>
+    /// <t_1>
+    /// <t_2>
+    /// <t_3>
+    /// <focal length>
+    /// <distortion^2>
+    /// <distortion^4>
     pub fn from_file_text(filepath: &Path) -> Result<BAProblem, Error> {
         fn parse_internal(input: &str) -> IResult<&str, BAProblem, VerboseError<&str>> {
             fn unsigned(input: &str) -> IResult<&str, usize, VerboseError<&str>> {
@@ -329,6 +389,8 @@ impl BAProblem {
             })
     }
 
+    /// Parse a bundle adjustment problem from a file in the Bundle Adjustment in the Large binary
+    /// file format.
     pub fn from_file_binary(filepath: &Path) -> Result<BAProblem, Error> {
         fn parse_internal(input: &[u8]) -> IResult<&[u8], BAProblem, VerboseError<&[u8]>> {
             let (input, num_cameras) = be_u64(input)?;
@@ -390,6 +452,8 @@ impl BAProblem {
             })
     }
 
+    /// Parse a bundle adjustment problem from a file in the Bundle Adjustment in the Large format.
+    /// Supports both binary and text formats.
     pub fn from_file(path: &Path) -> Result<BAProblem, Error> {
         match path.extension().unwrap().to_str().unwrap() {
             "bal" => Self::from_file_text(path),
@@ -409,32 +473,12 @@ impl BAProblem {
         self.cameras.len()
     }
 
+    /// Number of camera-point observations.
     pub fn num_observations(&self) -> usize {
         self.vis_graph.iter().map(|x| x.len()).sum()
     }
 
-    pub fn verify(&self) {
-        if self.vis_graph.len() > self.num_cameras() {
-            println!(
-                "Have more observations than cameras. {} vs {}.",
-                self.vis_graph.len(),
-                self.num_cameras()
-            );
-        }
-        for (i, obs) in self.vis_graph.iter().enumerate() {
-            for (j, _) in obs.iter() {
-                if j >= &self.num_points() {
-                    println!(
-                        "Invalid observation of point {} ({}) from camera {}",
-                        j,
-                        self.num_points(),
-                        i
-                    );
-                }
-            }
-        }
-    }
-
+    /// Select a subset of the problem with camera indices in `ci` and point indices in `pi`.
     pub fn subset(&self, ci: &[usize], pi: &[usize]) -> Self {
         let cameras = ci
             .iter()
@@ -469,6 +513,7 @@ impl BAProblem {
         }
     }
 
+    /// Remove cameras that see less than 4 points and points seen less than twice.
     pub fn remove_singletons(&self) -> Self {
         // remove cameras that see less than 4 points
         let ci = self
@@ -591,6 +636,7 @@ impl BAProblem {
         culled
     }
 
+    /// Write problem in Bundle Adjustment in the Large text format.
     pub fn write_text(&self, path: &std::path::Path) -> Result<(), std::io::Error> {
         let mut file = BufWriter::new(File::create(path).unwrap());
         writeln!(
@@ -617,6 +663,7 @@ impl BAProblem {
         Ok(())
     }
 
+    /// Write problem in Bundle Adjustment in the Large binary format.
     pub fn write_binary(&self, path: &std::path::Path) -> Result<(), std::io::Error> {
         let mut file = BufWriter::new(File::create(path).unwrap());
         file.write_u64::<BigEndian>(self.cameras.len() as u64)?;

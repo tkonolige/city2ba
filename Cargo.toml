@@ -23,3 +23,8 @@ byteorder = "1"
 rstar = "*"
 line_intersection = "0.4"
 geo = "*"
+
+[dev-dependencies]
+assert_cmd = "0.12"
+predicates = "1"
+tempfile = "3"

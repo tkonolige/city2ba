@@ -168,13 +168,12 @@ pub fn generate_cameras_path_step(
     cameras
 }
 
-// Generate camera locations by placing cameras on a regular grid throughout the image. Locations
-// are then filtered based on their height.
-// TODO: smarter pattern for points. choose initial point and expand search?
-// TODO: keep generating points until we hit the target number
-pub fn generate_cameras_grid(
+/// Generate camera locations using a Poisson disk distribution of cameras in the x-y plane.
+/// Cameras are placed `height` above the tallest surface at their x-y location.
+pub fn generate_cameras_poisson(
     scene: &embree_rs::CommittedScene,
     num_points: usize,
+    height: f64,
     ground: f64,
 ) -> Vec<Camera> {
     let mut intersection_ctx = embree_rs::IntersectContext::coherent(); // not sure if this matters
@@ -192,17 +191,17 @@ pub fn generate_cameras_grid(
     // add a little wiggle room
     let start = Point3::new(
         bounds.upper_x as f64,
-        bounds.upper_y as f64,
-        bounds.upper_z as f64 + 0.1,
+        bounds.upper_y as f64 + 0.1,
+        bounds.upper_z as f64,
     );
     let delta = Vector3::new(
         (bounds.upper_x - bounds.lower_x) as f64,
-        (bounds.upper_y - bounds.lower_y) as f64,
         0.0,
+        (bounds.upper_z - bounds.lower_z) as f64,
     );
 
     for sample in samples {
-        let origin = start - delta.mul_element_wise(Vector3::new(sample[0], sample[1], 0.0));
+        let origin = start - delta.mul_element_wise(Vector3::new(sample[0], 0.0, sample[1]));
         let direction = Vector3::new(0.0, -1.0, 0.0); // looking directly down
         let ray = embree_rs::Ray::new(
             origin.cast::<f32>().unwrap().to_vec(),
@@ -212,9 +211,10 @@ pub fn generate_cameras_grid(
         scene.intersect(&mut intersection_ctx, &mut ray_hit);
         if ray_hit.hit.hit() {
             // push point up a little from where it hit
-            let pt = origin + direction * (ray_hit.ray.tfar as f64) + Vector3::new(0.0, 1.0, 0.0);
+            let pt =
+                origin + direction * (ray_hit.ray.tfar as f64) + Vector3::new(0.0, height, 0.0);
 
-            if pt[2] < bounds.lower_z as f64 + ground {
+            if pt[2] < bounds.lower_y as f64 + ground {
                 positions.push(pt);
             }
         }
@@ -232,7 +232,7 @@ pub fn generate_cameras_grid(
         .collect::<Vec<_>>()
 }
 
-pub fn iter_triangles<'a>(
+fn iter_triangles<'a>(
     mesh: &'a tobj::Mesh,
 ) -> impl Iterator<Item = (Point3<f64>, Point3<f64>, Point3<f64>)> + 'a {
     mesh.indices
@@ -304,7 +304,9 @@ impl rstar::Point for WrappedPoint {
     }
 }
 
-pub fn generate_world_points_poisson(
+/// Generate points uniformly in the world. Points are culled if they are more than `max_dist` from
+/// all cameras. Gives at most `num_points`.
+pub fn generate_world_points_uniform(
     models: &Vec<tobj::Model>,
     cameras: &Vec<Camera>,
     num_points: usize,
@@ -349,6 +351,8 @@ pub fn generate_world_points_poisson(
     points
 }
 
+/// Compute the camera-point visibility graph. Points not visible `max_dist` from any camera are
+/// dropped.
 pub fn visibility_graph(
     scene: &embree_rs::CommittedScene,
     cameras: &Vec<Camera>,
@@ -407,11 +411,12 @@ pub fn visibility_graph(
         .collect()
 }
 
-pub fn normalize(models: &Vec<tobj::Model>) -> Vec<tobj::Model> {
+/// Move models so that the top right corner of the bounding box is at the origin.
+pub fn move_to_origin(models: Vec<tobj::Model>) -> Vec<tobj::Model> {
     let min_vec = |x: Vector3<f32>, y: Vector3<f32>| {
         Vector3::new(x[0].min(y[0]), x[1].min(y[1]), x[2].min(y[2]))
     };
-    let min_locs = models
+    let min_locs = &models
         .iter()
         .map(|model| {
             model
@@ -434,8 +439,7 @@ pub fn normalize(models: &Vec<tobj::Model>) -> Vec<tobj::Model> {
                 .chunks(3)
                 .map(|chunk| {
                     let x = Vector3::new(chunk[0], chunk[1], chunk[2]) - min_locs;
-                    // ignore z for now
-                    vec![x[0], x[1], chunk[2]].into_iter()
+                    vec![x[0], x[1], x[2]].into_iter()
                 })
                 .flatten()
                 .collect();
@@ -453,6 +457,7 @@ pub fn normalize(models: &Vec<tobj::Model>) -> Vec<tobj::Model> {
         .collect()
 }
 
+/// Modify camera intrinsics so they are all in the range [`intrinsic_start`, `intrinsic_end`).
 pub fn modify_intrinsics(
     cameras: &mut Vec<Camera>,
     intrinsic_start: Vector3<f64>,

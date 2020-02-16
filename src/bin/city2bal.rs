@@ -11,6 +11,7 @@ use std::str::FromStr;
 
 use city2bal::*;
 
+// helper to parse Vector3 with structopt
 fn parse_vec3(s: &str) -> Result<Vector3<f64>, std::num::ParseFloatError> {
     let mut it = s.split(",").map(|x| f64::from_str(x));
     let x = it.next().unwrap()?;
@@ -20,14 +21,21 @@ fn parse_vec3(s: &str) -> Result<Vector3<f64>, std::num::ParseFloatError> {
 }
 
 #[derive(StructOpt, Debug)]
-#[structopt(name = "basic")]
+#[structopt(
+    name = "city2bal",
+    about = "Generate a bundle adjustment problem from an .obj file."
+)]
 struct Opt {
+    /// Input .obj model. Y is up and -Z is forward.
     #[structopt(name = "FILE", parse(from_os_str))]
     input: std::path::PathBuf,
 
+    /// Upper bound on the number of cameras to generate.
     #[structopt(long = "cameras", default_value = "100")]
     num_cameras: usize,
 
+    /// Start of range for camera intrinsics. Generated cameras with have intrinsics in the range
+    /// [<intrinsics-start>, <intrinsics-end>).
     #[structopt(
         long = "intrinsics-start",
         default_value = "1,0,0",
@@ -35,6 +43,7 @@ struct Opt {
     )]
     intrinsics_start: Vector3<f64>,
 
+    /// End of range for camera intrinsics.
     #[structopt(
         long = "intrinsics-end",
         default_value = "1,0,0",
@@ -42,27 +51,44 @@ struct Opt {
     )]
     intrinsics_end: Vector3<f64>,
 
+    /// Upper bound on the number of points visible in the world.
+    /// Often, the number of generated points is smaller than this amount.
     #[structopt(long = "points", default_value = "1000")]
     num_world_points: usize,
 
+    /// Maximum distance between a camera and a point.
     #[structopt(long = "max-dist", default_value = "100")]
     max_dist: f64,
 
-    #[structopt(long = "ground", default_value = "10")]
+    /// Minimum absolute height for cameras generated with Poisson disk sampling. This is an offset
+    /// from the bottom of the bounding box of the model.
+    #[structopt(long = "ground", default_value = "0", allow_hyphen_values = true)]
     ground: f64,
 
+    /// Height off of terrain for cameras generated with Poisson disk sampling. Cameras are pushed
+    /// this far above the surface.
+    #[structopt(long = "height", default_value = "1")]
+    height: f64,
+
+    /// Do not compute the largest connected component of the camera-point visibility graph. This
+    /// may result in problems that have disconnected components.
     #[structopt(long = "no-lcc")]
     no_lcc: bool,
 
-    #[structopt(long = "normalize")]
-    normalize: bool,
+    /// Move .obj model so that its top right corner is at the origin.
+    #[structopt(long = "move-to-origin")]
+    move_to_origin: bool,
 
+    /// Output file. Will be output in binary format if the ending is .bbal.
     #[structopt(name = "OUT", parse(from_os_str))]
     bal_out: std::path::PathBuf,
 
-    #[structopt(long = "path")]
+    /// Generate cameras randomly along the path named <PATH>. Cameras with face in the direction
+    /// of the path. Replaces Poisson disk camera generation
+    #[structopt(long = "path", conflicts_with = "ground")]
     path: Option<String>,
 
+    /// If > 0, cameras will be generated sequentially on the path at <step-size> intervals.
     #[structopt(long = "step-size", default_value = "0")]
     step_size: f64,
 }
@@ -91,8 +117,8 @@ fn main() -> Result<(), std::io::Error> {
         None
     };
 
-    if opt.normalize {
-        models = normalize(&models);
+    if opt.move_to_origin {
+        models = move_to_origin(models);
     };
 
     // create embree device
@@ -111,7 +137,7 @@ fn main() -> Result<(), std::io::Error> {
             generate_cameras_path_step(&cscene, &m_path, opt.num_cameras, opt.step_size)
         }
     } else {
-        generate_cameras_grid(&cscene, opt.num_cameras, opt.ground)
+        generate_cameras_poisson(&cscene, opt.num_cameras, opt.height, opt.ground)
     };
     println!("Generated {} cameras", cameras.len());
 
@@ -119,7 +145,7 @@ fn main() -> Result<(), std::io::Error> {
     println!("Modified intrinsics");
 
     let points =
-        generate_world_points_poisson(&models, &cameras, opt.num_world_points, opt.max_dist);
+        generate_world_points_uniform(&models, &cameras, opt.num_world_points, opt.max_dist);
     println!("Generated {} world points", points.len());
 
     // TODO: use something more sophisticated to calculate the max distance

@@ -7,50 +7,64 @@ use city2bal::*;
 #[derive(StructOpt, Debug)]
 #[structopt(name = "noise", about = "Tool to add noise/error to a BA problem")]
 struct Opt {
-    // Input BA file
+    /// Input bundle adjustment problem. Should be in .bal or .bbal file format.
     #[structopt(name = "FILE", parse(from_os_str))]
     input: std::path::PathBuf,
 
+    /// Standard deviation of Gaussian noise added to camera rotations.
     #[structopt(long = "rotation-std", default_value = "0.0")]
     rotation_std: f64,
 
+    /// Standard deviation of Gaussian noise added to camera translations.
     #[structopt(long = "translation-std", default_value = "0.0")]
     translation_std: f64,
 
+    /// Standard deviation of Gaussian noise added to point translations.
     #[structopt(long = "point-std", default_value = "0.0")]
     point_std: f64,
 
+    /// Standard deviation of Gaussian noise added to observations.
     #[structopt(long = "observation-std", default_value = "0.0")]
     observation_std: f64,
 
+    /// Standard deviation of Gaussian noise added to camera intrinsics. Treats all intrinsics as
+    /// if they are at the same scale.
     #[structopt(long = "intrinsic-std", default_value = "0.0")]
     intrinsic_std: f64,
 
+    /// Standard deviation of translational drift added to the problem. Drift is proportional to
+    /// the distance of each camera and point from the origin. Drift is scaled relative to problem
+    /// size.
     #[structopt(long = "drift-std", default_value = "0.0")]
     drift_std: f64,
 
+    /// Strength of translational drift added to each camera and point. Constant factor multiplied
+    /// with the distance of each camera and point from the origin.
     #[structopt(long = "drift-strength", default_value = "0.0")]
     drift_strength: f64,
 
+    /// Strength of rotational drift added to each camera and point.
     #[structopt(long = "drift-angle", default_value = "0.0")]
     drift_angle: f64,
 
-    // Probability of a mismatch occurring in a match
+    /// Probability of turning a correct correspondence into a incorrect one.
     #[structopt(long = "mismatch-chance", default_value = "0.0")]
     mismatch_chance: f64,
 
-    // Percentage of features to keep per camera
+    /// Percentage of features to keep per camera.
     #[structopt(long = "drop-features", default_value = "1.0")]
     drop_features: f64,
 
-    // Percentage of landmarks to split in two
+    /// Percentage of landmarks to split in two separate landmarks at the same location.
+    /// Observations will be split between the two.
     #[structopt(long = "split-landmarks", default_value = "0.0")]
     split_landmarks: f64,
 
-    // Percentage of observations that should choose two landmarks to be the same
+    /// Percentage of observations that sees two landmarks as the same one.
     #[structopt(long = "join-landmarks", default_value = "0.0")]
     join_landmarks: f64,
 
+    /// Output file name. Can output in .bal or .bbal format.
     #[structopt(name = "OUT", parse(from_os_str))]
     output: std::path::PathBuf,
 }

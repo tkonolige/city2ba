@@ -4,7 +4,10 @@ use city2bal::*;
 use structopt::StructOpt;
 
 #[derive(StructOpt, Debug)]
-#[structopt(name = "basic")]
+#[structopt(
+    name = "check",
+    about = "Check accuracy of a bundle adjustment problem"
+)]
 struct Opt {
     #[structopt(name = "FILE", parse(from_os_str))]
     input: std::path::PathBuf,
