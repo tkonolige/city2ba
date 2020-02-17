@@ -126,7 +126,7 @@ fn hits_building(c: Point3<f64>, p: Point3<f64>, block_length: f64, block_inset:
 }
 
 /// Generate a synthetic scene of buildings on a grid.
-pub fn synthetic_grid(
+pub fn synthetic_grid<C>(
     num_cameras_per_block: usize,
     num_points_per_block: usize,
     block_inset: f64,
@@ -135,7 +135,10 @@ pub fn synthetic_grid(
     camera_height: f64,
     point_height: f64,
     max_dist: f64,
-) -> BAProblem {
+) -> BAProblem<C>
+where
+    C: Camera + Sync + Clone,
+{
     assert!(block_inset * 2. < block_length);
     let mut cameras = Vec::new();
     for bx in 0..num_blocks {
@@ -211,7 +214,7 @@ pub fn synthetic_grid(
     let visibility = cameras
         .par_iter()
         .progress_with(pb)
-        .map(|camera| {
+        .map(|camera: &C| {
             let mut obs = Vec::new();
             for p in rtree.locate_within_distance(
                 WrappedPoint(camera.center(), std::usize::MAX),

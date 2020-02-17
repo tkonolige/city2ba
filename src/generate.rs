@@ -63,11 +63,14 @@ pub fn model_to_geometry<'a>(
 
 /// Generate cameras along a path. Cameras will be pointed along the direction of movement of the
 /// path.
-pub fn generate_cameras_path(
+pub fn generate_cameras_path<C>(
     _scene: &embree_rs::CommittedScene,
     path: &tobj::Model,
     num_cameras: usize,
-) -> Vec<Camera> {
+) -> Vec<C>
+where
+    C: Camera,
+{
     let vertices = path
         .mesh
         .positions
@@ -109,12 +112,15 @@ pub fn generate_cameras_path(
 
 /// Generate camera positions along a path by starting at the beginning of the path and taking
 /// fixed sized steps between each camera.
-pub fn generate_cameras_path_step(
+pub fn generate_cameras_path_step<C>(
     _scene: &embree_rs::CommittedScene,
     path: &tobj::Model,
     num_cameras: usize,
     step_size: f64,
-) -> Vec<Camera> {
+) -> Vec<C>
+where
+    C: Camera,
+{
     let vertices = path
         .mesh
         .positions
@@ -172,12 +178,15 @@ pub fn generate_cameras_path_step(
 
 /// Generate camera locations using a Poisson disk distribution of cameras in the x-y plane.
 /// Cameras are placed `height` above the tallest surface at their x-y location.
-pub fn generate_cameras_poisson(
+pub fn generate_cameras_poisson<C>(
     scene: &embree_rs::CommittedScene,
     num_points: usize,
     height: f64,
     ground: f64,
-) -> Vec<Camera> {
+) -> Vec<C>
+where
+    C: Camera,
+{
     let mut intersection_ctx = embree_rs::IntersectContext::coherent(); // not sure if this matters
     let mut positions = Vec::new();
 
@@ -308,12 +317,15 @@ impl rstar::Point for WrappedPoint {
 
 /// Generate points uniformly in the world. Points are culled if they are more than `max_dist` from
 /// all cameras. Gives at most `num_points`.
-pub fn generate_world_points_uniform(
+pub fn generate_world_points_uniform<C>(
     models: &Vec<tobj::Model>,
-    cameras: &Vec<Camera>,
+    cameras: &Vec<C>,
     num_points: usize,
     max_dist: f64,
-) -> Vec<Point3<f64>> {
+) -> Vec<Point3<f64>>
+where
+    C: Camera,
+{
     // TODO: filter meshes by distance from cameras
     let areas = models.iter().flat_map(|model| {
         iter_triangles(&model.mesh)
@@ -355,12 +367,15 @@ pub fn generate_world_points_uniform(
 
 /// Compute the camera-point visibility graph. Points not visible `max_dist` from any camera are
 /// dropped.
-pub fn visibility_graph(
+pub fn visibility_graph<C>(
     scene: &embree_rs::CommittedScene,
-    cameras: &Vec<Camera>,
+    cameras: &Vec<C>,
     points: &Vec<Point3<f64>>,
     max_dist: f64,
-) -> Vec<Vec<(usize, (f64, f64))>> {
+) -> Vec<Vec<(usize, (f64, f64))>>
+where
+    C: Camera + Sync,
+{
     let pb = ProgressBar::new(cameras.len().try_into().unwrap());
     pb.set_style(
         ProgressStyle::default_bar()
@@ -461,7 +476,7 @@ pub fn move_to_origin(models: Vec<tobj::Model>) -> Vec<tobj::Model> {
 
 /// Modify camera intrinsics so they are all in the range [`intrinsic_start`, `intrinsic_end`).
 pub fn modify_intrinsics(
-    cameras: &mut Vec<Camera>,
+    cameras: &mut Vec<SnavelyCamera>,
     intrinsic_start: Vector3<f64>,
     intrinsic_end: Vector3<f64>,
 ) {

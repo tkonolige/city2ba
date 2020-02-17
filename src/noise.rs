@@ -37,7 +37,10 @@ fn unit_random() -> Vector3<f64> {
 /// where
 /// dir is the direction of standard deviation of the problem and gamma is a normal random variable
 /// with standard deviation of std.
-pub fn add_drift(bal: BAProblem, strength: f64, angle_strength: f64, std: f64) -> BAProblem {
+pub fn add_drift<C>(bal: BAProblem<C>, strength: f64, angle_strength: f64, std: f64) -> BAProblem<C>
+where
+    C: Camera,
+{
     // TODO: add twisting to the noise
     // Choose the drift direction to be in line with the largest standard deviation.
     let dir = bal.std().normalize();
@@ -91,14 +94,17 @@ pub fn add_drift(bal: BAProblem, strength: f64, angle_strength: f64, std: f64) -
 }
 
 /// Add Gaussian noise to a problem.
-pub fn add_noise(
-    bal: BAProblem,
+pub fn add_noise<C>(
+    bal: BAProblem<C>,
     translation_std: f64,
     rotation_std: f64,
     intrinsics_std: f64,
     point_std: f64,
     observations_std: f64,
-) -> BAProblem {
+) -> BAProblem<C>
+where
+    C: Camera,
+{
     let n_translation = Normal::new(0.0, translation_std.into());
     let n_rotation = Normal::new(0.0, rotation_std.into());
     let n_intrinsics = Normal::new(0.0, intrinsics_std.into());
@@ -152,7 +158,10 @@ pub fn add_noise(
 }
 
 /// Add incorrect correspondences by swapping two nearby observations.
-pub fn add_incorrect_correspondences(bal: BAProblem, mismatch_chance: f64) -> BAProblem {
+pub fn add_incorrect_correspondences<C>(bal: BAProblem<C>, mismatch_chance: f64) -> BAProblem<C>
+where
+    C: Camera,
+{
     let observations = bal
         .vis_graph
         .into_iter()
@@ -198,7 +207,10 @@ pub fn add_incorrect_correspondences(bal: BAProblem, mismatch_chance: f64) -> BA
 }
 
 /// Drop camera-point observations.
-pub fn drop_features(bal: BAProblem, drop_percent: f64) -> BAProblem {
+pub fn drop_features<C>(bal: BAProblem<C>, drop_percent: f64) -> BAProblem<C>
+where
+    C: Camera,
+{
     let mut rng = thread_rng();
     let observations = bal
         .vis_graph
@@ -220,7 +232,10 @@ pub fn drop_features(bal: BAProblem, drop_percent: f64) -> BAProblem {
 
 /// Split landmarks into two different landmarks at the same location. Observations as split
 /// randomly between the new landmarks.
-pub fn split_landmarks(bal: BAProblem, split_percent: f64) -> BAProblem {
+pub fn split_landmarks<C>(bal: BAProblem<C>, split_percent: f64) -> BAProblem<C>
+where
+    C: Camera,
+{
     let mut rng = thread_rng();
     // select which landmarks to split in two
     let l = bal.points.len();
@@ -286,7 +301,10 @@ impl rstar::Point for IndexedVector3 {
 }
 
 /// Randomly join two landmarks into a single one for some camera observations.
-pub fn join_landmarks(bal: BAProblem, join_percent: f64) -> BAProblem {
+pub fn join_landmarks<C>(bal: BAProblem<C>, join_percent: f64) -> BAProblem<C>
+where
+    C: Camera,
+{
     let observations = {
         let rtree = RTree::bulk_load(
             bal.points

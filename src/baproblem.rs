@@ -3,20 +3,21 @@ extern crate cgmath;
 extern crate disjoint_sets;
 extern crate itertools;
 extern crate nom;
-extern crate rayon;
 
+use byteorder::*;
 use cgmath::prelude::*;
 use cgmath::{
     AbsDiffEq, Basis3, ElementWise, InnerSpace, Point2, Point3, Quaternion, Rotation, Rotation3,
     Vector3,
 };
+use disjoint_sets::*;
+use itertools::Itertools;
 use nom::character::streaming::*;
 use nom::error::VerboseError;
 use nom::multi::count;
 use nom::number::streaming::*;
 use nom::sequence::*;
 use nom::*;
-use rayon::prelude::*;
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -25,11 +26,6 @@ use std::io::{BufWriter, Write};
 use std::iter::FromIterator;
 use std::path::Path;
 use std::str::FromStr;
-
-use disjoint_sets::*;
-
-use byteorder::*;
-use itertools::Itertools;
 
 #[derive(Debug)]
 pub enum Error {
@@ -66,33 +62,104 @@ fn to_rodrigues(x: Basis3<f64>) -> Vector3<f64> {
     axis.normalize() * angle
 }
 
+pub trait Camera {
+    /// Project a point from the world into the camera coordinate system
+    fn project_world(&self, p: &Point3<f64>) -> Point3<f64>;
+
+    /// Project a point from camera space into pixel coordinates
+    fn project(&self, p: cgmath::Point3<f64>) -> cgmath::Point2<f64>;
+
+    /// Create a camera from a position and direction.
+    fn from_position_direction(
+        position: Point3<f64>,
+        dir: Basis3<f64>,
+        intrin: Vector3<f64>,
+    ) -> Self;
+
+    /// Center of the camera. -(R^T t).
+    fn center(&self) -> Point3<f64>;
+
+    /// Transform a camera with a rotation, translation, and intrinsics modification.
+    fn transform(
+        &self,
+        delta_dir: Basis3<f64>,
+        delta_loc: Vector3<f64>,
+        delta_intrin: Vector3<f64>,
+    ) -> Self;
+
+    /// Project a point into this cameras frame of reference.
+    fn to_world(&self, p: Point3<f64>) -> Point3<f64>;
+}
+
 /// Camera expressed as Rx+t with intrinsics.
 /// The camera points down the negative z axis. Up is the positive y axis.
 #[derive(Debug, Clone)]
-pub struct Camera {
+pub struct SnavelyCamera {
     pub loc: Vector3<f64>,    // t -- translation
     pub dir: Basis3<f64>,     // R -- rotation
     pub intrin: Vector3<f64>, // focal length, radial distortion x2
 }
 
-impl Camera {
+impl Camera for SnavelyCamera {
     /// Project a point from the world into the camera coordinate system
-    pub fn project_world(&self, p: &Point3<f64>) -> cgmath::Point3<f64> {
+    fn project_world(&self, p: &Point3<f64>) -> cgmath::Point3<f64> {
         self.dir.rotate_point(*p) + self.loc
     }
 
     /// Project a point from camera space into pixel coordinates
-    pub fn project(&self, p: cgmath::Point3<f64>) -> cgmath::Point2<f64> {
+    fn project(&self, p: cgmath::Point3<f64>) -> cgmath::Point2<f64> {
         let p_ = cgmath::Vector2::new(-p.x / p.z, -p.y / p.z);
         let r = 1.0
             + self.distortion().0 * p_.magnitude2()
             + self.distortion().1 * p_.magnitude().powf(4.0);
         Point2::from_vec(self.focal_length() * r * p_)
     }
+    /// Create a camera from a position and direction.
+    fn from_position_direction(
+        position: Point3<f64>,
+        dir: Basis3<f64>,
+        intrin: Vector3<f64>,
+    ) -> Self {
+        SnavelyCamera {
+            loc: -1.0 * (dir.rotate_point(position)).to_vec(),
+            dir: dir,
+            intrin: intrin,
+        }
+    }
 
+    /// Center of the camera. -(R^T t).
+    fn center(&self) -> Point3<f64> {
+        Point3::from_vec(-(self.dir.invert().rotate_vector(self.loc)))
+    }
+
+    /// Transform a camera with a rotation, translation, and intrinsics modification.
+    fn transform(
+        &self,
+        delta_dir: Basis3<f64>,
+        delta_loc: Vector3<f64>,
+        delta_intrin: Vector3<f64>,
+    ) -> Self {
+        SnavelyCamera {
+            dir: self.dir * delta_dir,
+            loc: -1.0
+                * self
+                    .rotation()
+                    .rotate_point(self.center() + delta_loc)
+                    .to_vec(),
+            intrin: self.intrin + delta_intrin,
+        }
+    }
+
+    /// Project a point into this cameras frame of reference.
+    fn to_world(&self, p: Point3<f64>) -> Point3<f64> {
+        self.dir.invert().rotate_point(p - self.loc)
+    }
+}
+
+impl SnavelyCamera {
     /// Parse a camera from a vector of parameters. Order is R, t, intrinsics.
     pub fn from_vec(x: Vec<f64>) -> Self {
-        Camera {
+        SnavelyCamera {
             dir: from_rodrigues(Vector3::new(x[0], x[1], x[2])),
             loc: Vector3::new(x[3], x[4], x[5]),
             intrin: Vector3::new(x[6], x[7], x[8]),
@@ -115,24 +182,6 @@ impl Camera {
         ]
     }
 
-    /// Create a camera from a position and direction.
-    pub fn from_position_direction(
-        position: Point3<f64>,
-        dir: Basis3<f64>,
-        intrin: Vector3<f64>,
-    ) -> Self {
-        Camera {
-            loc: -1.0 * (dir.rotate_point(position)).to_vec(),
-            dir: dir,
-            intrin: intrin,
-        }
-    }
-
-    /// Center of the camera. -(R^T t).
-    pub fn center(&self) -> Point3<f64> {
-        Point3::from_vec(-(self.dir.invert().rotate_vector(self.loc)))
-    }
-
     pub fn rotation(&self) -> Basis3<f64> {
         self.dir
     }
@@ -144,35 +193,12 @@ impl Camera {
     pub fn distortion(&self) -> (f64, f64) {
         (self.intrin[1], self.intrin[2])
     }
-
-    /// Transform a camera with a rotation, translation, and intrinsics modification.
-    pub fn transform(
-        &self,
-        delta_dir: Basis3<f64>,
-        delta_loc: Vector3<f64>,
-        delta_intrin: Vector3<f64>,
-    ) -> Camera {
-        Camera {
-            dir: self.dir * delta_dir,
-            loc: -1.0
-                * self
-                    .rotation()
-                    .rotate_point(self.center() + delta_loc)
-                    .to_vec(),
-            intrin: self.intrin + delta_intrin,
-        }
-    }
-
-    /// Project a point into this cameras frame of reference.
-    pub fn to_world(&self, p: Point3<f64>) -> Point3<f64> {
-        self.dir.invert().rotate_point(p - self.loc)
-    }
 }
 
 #[test]
 fn test_project_world() {
     let p = Point3::new(0.0, 0.0, -1.0);
-    let c = Camera::from_vec(vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+    let c = SnavelyCamera::from_vec(vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
     let p_camera = c.project_world(&p);
     assert!(p_camera.z < 0.0);
     assert!(p_camera.x == 0.0 && p_camera.y == 0.0);
@@ -181,7 +207,7 @@ fn test_project_world() {
 #[test]
 fn test_project() {
     let p = Point3::new(0.0, 0.0, -1.0);
-    let c = Camera::from_vec(vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+    let c = SnavelyCamera::from_vec(vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
     let uv = c.project(c.project_world(&p));
     assert!(uv.x == 0.0 && uv.y == 0.0);
 }
@@ -189,24 +215,24 @@ fn test_project() {
 #[test]
 fn test_project_isomorphic() {
     let p = Point3::new(1.0, 3.0, -1.0);
-    let c = Camera::from_vec(vec![3.0, 5.0, -2.0, 0.5, -0.2, 0.1, 1.0, 0.0, 0.0]);
+    let c = SnavelyCamera::from_vec(vec![3.0, 5.0, -2.0, 0.5, -0.2, 0.1, 1.0, 0.0, 0.0]);
     assert!(c.to_world(c.project_world(&p)).abs_diff_eq(&p, 1e-8));
 }
 
 /// Bundle adjustment problem composed of cameras, points, and observations of points by cameras.
 #[derive(Debug, Clone)]
-pub struct BAProblem {
-    pub cameras: Vec<Camera>,
+pub struct BAProblem<C: Camera> {
+    pub cameras: Vec<C>,
     pub points: Vec<Point3<f64>>,
     pub vis_graph: Vec<Vec<(usize, (f64, f64))>>,
 }
 
-impl BAProblem {
+impl<C: Camera> BAProblem<C> {
     /// Amount of reprojection error in the problem. Computed as the `norm`-norm of the difference
     /// of all observed points from their projection.
     pub fn total_reprojection_error(&self, norm: f64) -> f64 {
         self.cameras
-            .par_iter()
+            .iter()
             .zip(&self.vis_graph)
             .map(|(camera, adj)| {
                 adj.iter()
@@ -277,11 +303,7 @@ impl BAProblem {
     /// Create a new bundle adjustment problem from a set a cameras, points, and observations.
     /// Observations are a tuple of camera index, point index, u, v where the camera sees the point
     /// at u,v.
-    pub fn new(
-        cams: Vec<Camera>,
-        points: Vec<Point3<f64>>,
-        obs: Vec<(usize, usize, f64, f64)>,
-    ) -> Self {
+    pub fn new(cams: Vec<C>, points: Vec<Point3<f64>>, obs: Vec<(usize, usize, f64, f64)>) -> Self {
         let mut vis_graph = vec![Vec::new(); cams.len()];
         for (cam_i, p_i, obs_x, obs_y) in obs {
             assert!(cam_i < cams.len());
@@ -300,7 +322,7 @@ impl BAProblem {
     /// Observations are a vector containing vectors of the points seen by the camera at the
     /// respective index.
     pub fn from_visibility(
-        cams: Vec<Camera>,
+        cams: Vec<C>,
         points: Vec<Point3<f64>>,
         obs: Vec<Vec<(usize, (f64, f64))>>,
     ) -> Self {
@@ -317,6 +339,185 @@ impl BAProblem {
         }
     }
 
+    pub fn num_points(&self) -> usize {
+        self.points.len()
+    }
+
+    pub fn num_cameras(&self) -> usize {
+        self.cameras.len()
+    }
+
+    /// Number of camera-point observations.
+    pub fn num_observations(&self) -> usize {
+        self.vis_graph.iter().map(|x| x.len()).sum()
+    }
+}
+
+impl<C: Camera + Clone> BAProblem<C> {
+    /// Select a subset of the problem with camera indices in `ci` and point indices in `pi`.
+    pub fn subset(self, ci: &[usize], pi: &[usize]) -> Self {
+        let cameras = ci
+            .iter()
+            .map(|i| self.cameras[*i].clone())
+            .collect::<Vec<_>>();
+        let points = pi
+            .iter()
+            .map(|i| self.points[*i].clone())
+            .collect::<Vec<_>>();
+
+        // use i64 here so we can mark points that aren't in the final set
+        let mut point_indices: Vec<i64> = vec![-1; self.points.len()];
+        for (i, p) in pi.iter().enumerate() {
+            point_indices[*p] = i as i64;
+        }
+
+        let obs = ci
+            .iter()
+            .map(|i| self.vis_graph[*i].clone())
+            .map(|obs| {
+                obs.iter()
+                    .filter(|(i, _)| point_indices[*i] >= 0)
+                    .map(|(i, uv)| (point_indices[*i] as usize, uv.clone()))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+
+        BAProblem {
+            cameras: cameras,
+            points: points,
+            vis_graph: obs,
+        }
+    }
+
+    /// Remove cameras that see less than 4 points and points seen less than twice.
+    pub fn remove_singletons(self) -> Self {
+        // remove cameras that see less than 4 points
+        let ci = self
+            .vis_graph
+            .iter()
+            .enumerate()
+            .filter(|(_, v)| v.len() > 3)
+            .map(|(i, _)| i)
+            .collect::<Vec<_>>();
+
+        let mut point_count: Vec<i64> = vec![0; self.points.len()];
+        // TODO: skip cameras that we have already removed
+        for obs in self.vis_graph.iter() {
+            for (i, _) in obs.iter() {
+                point_count[*i] += 1;
+            }
+        }
+
+        // remove points seen less than twice
+        let pi = point_count
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| **c > 1)
+            .map(|(i, _)| i)
+            .collect::<Vec<_>>();
+
+        self.subset(ci.as_slice(), pi.as_slice())
+    }
+
+    /// Get the largest connected component of cameras and points.
+    pub fn largest_connected_component(self) -> Self {
+        if self.num_cameras() <= 0 {
+            return self;
+        }
+
+        let num_cameras = self.num_cameras();
+        let num_points = self.num_points();
+
+        let mut uf = UnionFind::new(self.num_points() + self.num_cameras());
+
+        // point index is num_cameras + point id
+        for (i, obs) in self.vis_graph.iter().enumerate() {
+            for (j, _) in obs {
+                let p = j + self.num_cameras();
+                if !uf.equiv(i, p) {
+                    uf.union(i, p);
+                }
+            }
+        }
+
+        let sets = uf.to_vec();
+
+        // find largest set
+        let mut hm = HashMap::new();
+        for i in 0..num_cameras {
+            let x = hm.entry(sets[i]).or_insert(0);
+            *x += 1;
+        }
+        let lcc_id = *(hm
+            .iter()
+            .sorted_by(|a, b| Ord::cmp(&b.1, &a.1))
+            .next()
+            .unwrap()
+            .0);
+
+        // compute component
+        // new cameras and points
+        let cameras = self
+            .cameras
+            .into_iter()
+            .zip(sets.iter())
+            .filter(|x| *x.1 == lcc_id)
+            .map(|x| x.0)
+            .collect::<Vec<_>>();
+        let points = self
+            .points
+            .into_iter()
+            .zip(sets[num_cameras..].iter())
+            .filter(|x| *x.1 == lcc_id)
+            .map(|x| x.0)
+            .collect::<Vec<_>>();
+
+        // map from old id to new
+        let point_ids = sets[num_cameras..(num_cameras + num_points)]
+            .iter()
+            .enumerate()
+            .filter(|x| *x.1 == lcc_id)
+            .map(|x| x.0);
+        let point_map =
+            HashMap::<usize, usize>::from_iter(point_ids.enumerate().map(|(x, y)| (y, x)));
+        // new camera id is implicitly handled by filtering
+        let vis_graph = self
+            .vis_graph
+            .into_iter()
+            .enumerate()
+            .filter(|x| sets[x.0] == lcc_id)
+            .map(|(_, obs)| {
+                obs.into_iter()
+                    .filter(|x| sets[x.0] == lcc_id)
+                    .map(|(i, p)| (point_map[&i], p))
+                    .collect()
+            })
+            .collect();
+
+        BAProblem {
+            cameras: cameras,
+            points: points,
+            vis_graph: vis_graph,
+        }
+    }
+
+    /// Construct the largest connected component that contains cameras viewing 4 or more points
+    /// and points viewed at least twice.
+    pub fn cull(self) -> Self {
+        let mut nc = self.num_cameras();
+        let mut np = self.num_points();
+        let mut culled = self.largest_connected_component().remove_singletons();
+        while culled.num_cameras() != nc || culled.num_points() != np {
+            nc = culled.num_cameras();
+            np = culled.num_points();
+            culled = culled.largest_connected_component().remove_singletons();
+        }
+
+        culled
+    }
+}
+
+impl BAProblem<SnavelyCamera> {
     /// Parse a bundle adjustment problem from a file in the Bundle Adjustment in the Large text
     /// file format.
     ///
@@ -341,8 +542,10 @@ impl BAProblem {
     /// <focal length>
     /// <distortion^2>
     /// <distortion^4>
-    pub fn from_file_text(filepath: &Path) -> Result<BAProblem, Error> {
-        fn parse_internal(input: &str) -> IResult<&str, BAProblem, VerboseError<&str>> {
+    pub fn from_file_text(filepath: &Path) -> Result<Self, Error> {
+        fn parse_internal(
+            input: &str,
+        ) -> IResult<&str, BAProblem<SnavelyCamera>, VerboseError<&str>> {
             fn unsigned(input: &str) -> IResult<&str, usize, VerboseError<&str>> {
                 nom::combinator::map_res(digit1, usize::from_str)(input)
             }
@@ -365,7 +568,7 @@ impl BAProblem {
             )(input)?;
 
             let camera = nom::combinator::map(count(preceded(multispace0, double), 9), |x| {
-                Camera::from_vec(x)
+                SnavelyCamera::from_vec(x)
             });
             let (input, cameras) = count(camera, num_cameras)(input)?;
             let point = nom::combinator::map(count(preceded(multispace0, double), 3), |x| {
@@ -391,8 +594,10 @@ impl BAProblem {
 
     /// Parse a bundle adjustment problem from a file in the Bundle Adjustment in the Large binary
     /// file format.
-    pub fn from_file_binary(filepath: &Path) -> Result<BAProblem, Error> {
-        fn parse_internal(input: &[u8]) -> IResult<&[u8], BAProblem, VerboseError<&[u8]>> {
+    pub fn from_file_binary(filepath: &Path) -> Result<Self, Error> {
+        fn parse_internal(
+            input: &[u8],
+        ) -> IResult<&[u8], BAProblem<SnavelyCamera>, VerboseError<&[u8]>> {
             let (input, num_cameras) = be_u64(input)?;
             let (input, num_points) = be_u64(input)?;
             let (input, _num_observations) = be_u64(input)?;
@@ -415,7 +620,7 @@ impl BAProblem {
             let (input, cameras) = count(
                 |input| {
                     let (input, v) = count(be_f64, 9)(input)?;
-                    Ok((input, Camera::from_vec(v)))
+                    Ok((input, SnavelyCamera::from_vec(v)))
                 },
                 num_cameras as usize,
             )(input)?;
@@ -454,7 +659,7 @@ impl BAProblem {
 
     /// Parse a bundle adjustment problem from a file in the Bundle Adjustment in the Large format.
     /// Supports both binary and text formats.
-    pub fn from_file(path: &Path) -> Result<BAProblem, Error> {
+    pub fn from_file(path: &Path) -> Result<Self, Error> {
         match path.extension().unwrap().to_str().unwrap() {
             "bal" => Self::from_file_text(path),
             "bbal" => Self::from_file_binary(path),
@@ -463,177 +668,6 @@ impl BAProblem {
                 format!("unknown file extension {}", ext),
             ))),
         }
-    }
-
-    pub fn num_points(&self) -> usize {
-        self.points.len()
-    }
-
-    pub fn num_cameras(&self) -> usize {
-        self.cameras.len()
-    }
-
-    /// Number of camera-point observations.
-    pub fn num_observations(&self) -> usize {
-        self.vis_graph.iter().map(|x| x.len()).sum()
-    }
-
-    /// Select a subset of the problem with camera indices in `ci` and point indices in `pi`.
-    pub fn subset(&self, ci: &[usize], pi: &[usize]) -> Self {
-        let cameras = ci
-            .iter()
-            .map(|i| self.cameras[*i].clone())
-            .collect::<Vec<_>>();
-        let points = pi
-            .iter()
-            .map(|i| self.points[*i].clone())
-            .collect::<Vec<_>>();
-
-        // use i64 here so we can mark points that aren't in the final set
-        let mut point_indices: Vec<i64> = vec![-1; self.points.len()];
-        for (i, p) in pi.iter().enumerate() {
-            point_indices[*p] = i as i64;
-        }
-
-        let obs = ci
-            .iter()
-            .map(|i| self.vis_graph[*i].clone())
-            .map(|obs| {
-                obs.iter()
-                    .filter(|(i, _)| point_indices[*i] >= 0)
-                    .map(|(i, uv)| (point_indices[*i] as usize, uv.clone()))
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>();
-
-        BAProblem {
-            cameras: cameras,
-            points: points,
-            vis_graph: obs,
-        }
-    }
-
-    /// Remove cameras that see less than 4 points and points seen less than twice.
-    pub fn remove_singletons(&self) -> Self {
-        // remove cameras that see less than 4 points
-        let ci = self
-            .vis_graph
-            .iter()
-            .enumerate()
-            .filter(|(_, v)| v.len() > 3)
-            .map(|(i, _)| i)
-            .collect::<Vec<_>>();
-
-        let mut point_count: Vec<i64> = vec![0; self.points.len()];
-        // TODO: skip cameras that we have already removed
-        for obs in self.vis_graph.iter() {
-            for (i, _) in obs.iter() {
-                point_count[*i] += 1;
-            }
-        }
-
-        // remove points seen less than twice
-        let pi = point_count
-            .iter()
-            .enumerate()
-            .filter(|(_, c)| **c > 1)
-            .map(|(i, _)| i)
-            .collect::<Vec<_>>();
-
-        self.subset(ci.as_slice(), pi.as_slice())
-    }
-
-    /// Get the largest connected component of cameras and points.
-    pub fn largest_connected_component(&self) -> Self {
-        if self.num_cameras() <= 0 {
-            return (*self).clone();
-        }
-        let mut uf = UnionFind::new(self.num_points() + self.num_cameras());
-
-        // point index is num_cameras + point id
-        for (i, obs) in self.vis_graph.iter().enumerate() {
-            for (j, _) in obs {
-                let p = j + self.num_cameras();
-                if !uf.equiv(i, p) {
-                    uf.union(i, p);
-                }
-            }
-        }
-
-        let sets = uf.to_vec();
-
-        // find largest set
-        let mut hm = HashMap::new();
-        for i in 0..self.num_cameras() {
-            let x = hm.entry(sets[i]).or_insert(0);
-            *x += 1;
-        }
-        let lcc_id = *(hm
-            .iter()
-            .sorted_by(|a, b| Ord::cmp(&b.1, &a.1))
-            .next()
-            .unwrap()
-            .0);
-
-        // compute component
-        // new cameras and points
-        let cameras = self
-            .cameras
-            .iter()
-            .zip(sets.iter())
-            .filter(|x| *x.1 == lcc_id)
-            .map(|x| x.0.clone())
-            .collect::<Vec<_>>();
-        let points = self
-            .points
-            .iter()
-            .zip(sets[self.num_cameras()..].iter())
-            .filter(|x| *x.1 == lcc_id)
-            .map(|x| x.0.clone())
-            .collect::<Vec<_>>();
-
-        // map from old id to new
-        let point_ids = sets[self.num_cameras()..(self.num_cameras() + self.num_points())]
-            .iter()
-            .enumerate()
-            .filter(|x| *x.1 == lcc_id)
-            .map(|x| x.0);
-        let point_map =
-            HashMap::<usize, usize>::from_iter(point_ids.enumerate().map(|(x, y)| (y, x)));
-        // new camera id is implicitly handled by filtering
-        let vis_graph = self
-            .vis_graph
-            .iter()
-            .enumerate()
-            .filter(|x| sets[x.0] == lcc_id)
-            .map(|(_, obs)| {
-                obs.into_iter()
-                    .filter(|x| sets[x.0] == lcc_id)
-                    .map(|(i, p)| (point_map[&i], p.clone()))
-                    .collect()
-            })
-            .collect();
-
-        BAProblem {
-            cameras: cameras,
-            points: points,
-            vis_graph: vis_graph,
-        }
-    }
-
-    /// Construct the largest connected component that contains cameras viewing 4 or more points
-    /// and points viewed at least twice.
-    pub fn cull(&self) -> Self {
-        let mut nc = self.num_cameras();
-        let mut np = self.num_points();
-        let mut culled = self.largest_connected_component().remove_singletons();
-        while culled.num_cameras() != nc || culled.num_points() != np {
-            nc = culled.num_cameras();
-            np = culled.num_points();
-            culled = culled.largest_connected_component().remove_singletons();
-        }
-
-        culled
     }
 
     /// Write problem in Bundle Adjustment in the Large text format.
@@ -708,7 +742,10 @@ impl BAProblem {
     }
 }
 
-impl std::fmt::Display for BAProblem {
+impl<C> std::fmt::Display for BAProblem<C>
+where
+    C: Camera,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,

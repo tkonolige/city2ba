@@ -284,9 +284,9 @@ fn run_noise(opt: NoiseOpt) -> Result<(), city2ba::Error> {
 }
 
 /// Write camera locations out to a ply file. Cameras are red, points are green.
-fn write_cameras(
+fn write_cameras<C: Camera>(
     path: &std::path::Path,
-    cameras: &Vec<Camera>,
+    cameras: &Vec<C>,
     points: &Vec<Point3<f64>>,
     observations: &Vec<Vec<(usize, (f64, f64))>>,
 ) -> Result<(), std::io::Error> {
