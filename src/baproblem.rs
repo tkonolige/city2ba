@@ -91,12 +91,16 @@ pub trait Camera {
 }
 
 /// Camera expressed as Rx+t with intrinsics.
+///
 /// The camera points down the negative z axis. Up is the positive y axis.
 #[derive(Debug, Clone)]
 pub struct SnavelyCamera {
-    pub loc: Vector3<f64>,    // t -- translation
-    pub dir: Basis3<f64>,     // R -- rotation
-    pub intrin: Vector3<f64>, // focal length, radial distortion x2
+    /// Translational parameter `t`
+    pub loc: Vector3<f64>,
+    /// Rotational parameter `R`
+    pub dir: Basis3<f64>,
+    /// Intrinsics `intrin[0]` is the focal length, `intrin[1]` is the squared distortion, and `intrin[2]` is the quadratic distortion.
+    pub intrin: Vector3<f64>,
 }
 
 impl Camera for SnavelyCamera {
@@ -142,7 +146,7 @@ impl Camera for SnavelyCamera {
 }
 
 impl SnavelyCamera {
-    /// Parse a camera from a vector of parameters. Order is R, t, intrinsics.
+    /// Parse a camera from a vector of parameters. Order is rotation as a 3 element Rodrigues vector, translation, intrinsics.
     pub fn from_vec(x: Vec<f64>) -> Self {
         SnavelyCamera {
             dir: from_rodrigues(Vector3::new(x[0], x[1], x[2])),
@@ -151,7 +155,7 @@ impl SnavelyCamera {
         }
     }
 
-    /// Convert a camera to a vector of parameters. Order is R, t, intrinsics.
+    /// Parse a camera to a vector of parameters. Order is rotation as a 3 element Rodrigues vector, translation, intrinsics.
     pub fn to_vec(&self) -> Vec<f64> {
         let r = to_rodrigues(self.dir);
         vec![
@@ -180,6 +184,7 @@ impl SnavelyCamera {
         (self.intrin[1], self.intrin[2])
     }
 
+    /// Adjust the intrinsics of the camera as `intrin + delta`.
     pub fn modify_intrin(self, delta: Vector3<f64>) -> Self {
         SnavelyCamera {
             dir: self.dir,

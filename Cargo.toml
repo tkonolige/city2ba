@@ -3,6 +3,10 @@ name = "city2ba"
 version = "1.0.0"
 authors = ["Tristan Konolige <tristan.konolige@gmail.com>"]
 license = "BSD-2-Clause"
+homepage = "https://github.com/tkonolige/city2ba"
+repository = "https://github.com/tkonolige/city2ba"
+readme = "Readme.md"
+description = "A tool for generating synthetic bundle adjustment problems"
 build = "build.rs"
 edition = "2018"
 
@@ -18,7 +22,7 @@ itertools = "0.8"
 embree-rs = "0.3"
 rayon = "1"
 nom = "5"
-indicatif = {git = "https://github.com/mitsuhiko/indicatif.git", features=["with_rayon"]}
+indicatif = {version = "0.14", features=["with_rayon"]}
 disjoint-sets = "0.4"
 byteorder = "1"
 rstar = "0.7"

@@ -1,4 +1,17 @@
 //! Functions for adding noise to bundle adjustment problems.
+//!
+//! BAProblems generated from the `generate` or `synthetic` modules do not contain any noise. They
+//! have zero error. Test software against bundle adjustment problems, error needs to be added in.
+//! Many different kinds of error exist, but usual sources of error in bundle adjustment problems
+//! include:
+//! - Error from incorrect camera intrinsics.
+//! - Error from initialization drift ([add_drift], [add_drift_normalized]).
+//! - Error incorrect correspondences ([add_incorrect_correspondences], [drop_features],
+//! [split_landmarks], [join_landmarks]).
+//!
+//! In addition, this module provides functions to add less realistic noise:
+//! - Local error for every camera/point ([add_noise]).
+//! - Long range error ([add_sin_noise]).
 extern crate rand;
 use rand::distributions::{Distribution, Normal, WeightedIndex};
 use rand::prelude::*;
@@ -43,10 +56,12 @@ pub fn add_drift_normalized<C: Camera>(
 }
 
 /// Add drift-like noise to the problem. Each camera is transformed like so:
-/// d = ||-(R^T t)||
+/// ```txt
+/// d = ||camera.center()||
 /// R' = rotation_around_x(strength * gamma * d^1.2) * R
 /// t' = strength * d^2 * gamma * dir + t
 /// p' = strength * d^2 * gamma * dir + p
+/// ```
 /// where
 /// and gamma is a normal random variable
 /// with standard deviation of std.

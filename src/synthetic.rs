@@ -1,4 +1,4 @@
-//! Functions for generating cameras and points without reference geometry
+//! Functions for generating cameras and points without reference geometry.
 
 extern crate cgmath;
 extern crate geo;
