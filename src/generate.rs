@@ -1,4 +1,33 @@
 //! Functions to generate camera and point locations on a model.
+//!
+//! Example usage:
+//! ```
+//! extern crate tobj;
+//! use city2ba::*;
+//! use city2ba::generate::*;
+//! use std::path::Path;
+//!
+//! // load the model from disk
+//! let (models, _) = tobj::load_obj(Path::new("tests/box.obj")).expect("Could not load .obj");
+//! // convert the model into a form used for fast intersection tests
+//! let dev = embree_rs::Device::new();
+//! let mut scene = embree_rs::Scene::new(&dev);
+//! for model in models.iter() {
+//!     let mesh = model_to_geometry(model, &dev);
+//!     scene.attach_geometry(mesh);
+//! }
+//! let cscene = scene.commit();
+//! // generate cameras
+//! let cameras = generate_cameras_poisson::<SnavelyCamera>(&cscene, 100, 1., 0.);
+//! // generate points
+//! let points = generate_world_points_uniform(&models, &cameras, 200, 10.);
+//! // compute camera-point visibility graph
+//! let vis_graph = visibility_graph(&cscene, &cameras, &points, 10., false);
+//! // create BA problem
+//! let ba = BAProblem::from_visibility(cameras, points, vis_graph);
+//! // drop all but the largest connected component and drop cameras that do no see enough points
+//! let ba = ba.cull();
+//! ```
 
 extern crate cgmath;
 extern crate embree_rs;
