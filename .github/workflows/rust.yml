@@ -14,10 +14,15 @@ jobs:
     container: tkonolige/embree:3.8.0
     steps:
     - uses: actions/checkout@v2
-    - uses: actions-rs/cargo@v1
-    - uses: actions-rs/cargo@v1
+    - name: Install latest nightly
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+    - name: Build
+      uses: actions-rs/cargo@v1
       with:
         command: build
-    - uses: actions-rs/cargo@v1
+    - name: Test
+      uses: actions-rs/cargo@v1
       with:
         command: test
