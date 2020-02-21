@@ -288,8 +288,12 @@ impl<C: Camera> BAProblem<C> {
             .map(|x| x.center().clone())
             .chain(self.points.clone().into_iter())
             .fold(
-                Vector3::new(std::f64::INFINITY, std::f64::INFINITY, std::f64::INFINITY),
-                |x, y| Vector3::new(x.x.min(y.x), x.y.min(y.y), x.z.min(y.z)),
+                Vector3::new(
+                    -std::f64::INFINITY,
+                    -std::f64::INFINITY,
+                    -std::f64::INFINITY,
+                ),
+                |x, y| Vector3::new(x.x.max(y.x), x.y.max(y.y), x.z.max(y.z)),
             );
         (min, max)
     }
