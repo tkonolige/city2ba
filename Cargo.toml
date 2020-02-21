@@ -9,21 +9,21 @@ edition = "2018"
 [dependencies]
 tobj = {git = "https://github.com/tkonolige/tobj.git"}
 cgmath = "0.17"
-structopt = "*"
+structopt = "0.3"
 rand = "0.6"
-ply-rs = "*"
+ply-rs = "0.1"
 poisson = "0.10"
 nalgebra = "0.17"
-itertools = "*"
-embree-rs = "*"
+itertools = "0.8"
+embree-rs = "0.3"
 rayon = "1"
 nom = "5"
 indicatif = {git = "https://github.com/mitsuhiko/indicatif.git", features=["with_rayon"]}
-disjoint-sets = "*"
+disjoint-sets = "0.4"
 byteorder = "1"
-rstar = "*"
+rstar = "0.7"
 line_intersection = "0.4"
-geo = "*"
+geo = "0.4"
 
 [dev-dependencies]
 assert_cmd = "0.12"

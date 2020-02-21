@@ -9,7 +9,6 @@ extern crate rstar;
 
 use cgmath::prelude::*;
 use cgmath::{Basis3, Point3};
-use geo::Line;
 use indicatif::{ParallelProgressIterator};
 use line_intersection::LineInterval;
 use rayon::prelude::*;
@@ -81,11 +80,11 @@ fn hits_in_block(
     sides
         .iter()
         .map(|side| {
-            let side_segment = LineInterval::line_segment(Line {
+            let side_segment = LineInterval::line_segment(geo::Line {
                 start: side.0.into(),
                 end: side.1.into(),
             });
-            let view_segment = LineInterval::line_segment(Line {
+            let view_segment = LineInterval::line_segment(geo::Line {
                 start: start.into(),
                 end: end.into(),
             });
