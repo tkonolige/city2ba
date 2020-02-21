@@ -189,6 +189,10 @@ struct NoiseOpt {
     #[structopt(long = "drift-strength", default_value = "0.0")]
     drift_strength: f64,
 
+    /// Do not scale drift by problem size.
+    #[structopt(long = "fixed-drift")]
+    fixed_drift: bool,
+
     /// Strength of rotational drift added to each camera and point.
     #[structopt(long = "drift-angle", default_value = "0.0")]
     drift_angle: f64,
@@ -209,6 +213,16 @@ struct NoiseOpt {
     /// Percentage of observations that sees two landmarks as the same one.
     #[structopt(long = "join-landmarks", default_value = "0.0")]
     join_landmarks: f64,
+
+    /// Add noise to the problem that looks like a sin wave over the domain. Cameras are displaced
+    /// upwards as sin of normalize distance of the camera/point from the origin.
+    #[structopt(long = "sin-strength", default_value = "0.0")]
+    sin_strength: f64,
+
+    /// Controls the frequency of the sin wave noise. 1.0 indicates one full sin wave over the
+    /// domain (0-pi).
+    #[structopt(long = "sin-frequency", default_value = "1.0")]
+    sin_frequency: f64,
 
     /// Output file name. Can output in .bal or .bbal format.
     #[structopt(name = "OUT", parse(from_os_str))]
@@ -256,7 +270,35 @@ fn run_noise(opt: NoiseOpt) -> Result<(), city2ba::Error> {
         bal = bal.cull();
     }
 
-    bal = add_drift(bal, opt.drift_strength, opt.drift_angle, opt.drift_std);
+    if opt.fixed_drift {
+        let std_dir = bal.std();
+        bal = add_drift(
+            bal,
+            opt.drift_strength,
+            opt.drift_angle,
+            opt.drift_std,
+            std_dir,
+        );
+    } else {
+        bal = add_drift_normalized(bal, opt.drift_strength, opt.drift_angle, opt.drift_std);
+    }
+    // add sin noise that moves cameras upwards (in positive y)
+    if opt.sin_strength > 0. {
+        bal = add_sin_noise(
+            bal,
+            Vector3::new(1., 0., 0.),
+            Vector3::new(0., 1., 0.),
+            opt.sin_strength,
+            opt.sin_frequency,
+        );
+        bal = add_sin_noise(
+            bal,
+            Vector3::new(0., 0., 1.),
+            Vector3::new(0., 1., 0.),
+            opt.sin_strength,
+            opt.sin_frequency,
+        );
+    }
     bal = add_noise(
         bal,
         opt.translation_std,

@@ -76,12 +76,12 @@ pub trait Camera {
         intrin: Vector3<f64>,
     ) -> Self;
 
-    /// Center of the camera. -(R^T t).
+    /// Center of the camera.
     fn center(&self) -> Point3<f64>;
 
     /// Transform a camera with a rotation, translation, and intrinsics modification.
     fn transform(
-        &self,
+        self,
         delta_dir: Basis3<f64>,
         delta_loc: Vector3<f64>,
         delta_intrin: Vector3<f64>,
@@ -134,18 +134,14 @@ impl Camera for SnavelyCamera {
 
     /// Transform a camera with a rotation, translation, and intrinsics modification.
     fn transform(
-        &self,
+        self,
         delta_dir: Basis3<f64>,
         delta_loc: Vector3<f64>,
         delta_intrin: Vector3<f64>,
     ) -> Self {
         SnavelyCamera {
             dir: self.dir * delta_dir,
-            loc: -1.0
-                * self
-                    .rotation()
-                    .rotate_point(self.center() + delta_loc)
-                    .to_vec(),
+            loc: -1.0 * self.dir.rotate_point(self.center() + delta_loc).to_vec(),
             intrin: self.intrin + delta_intrin,
         }
     }

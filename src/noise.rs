@@ -29,22 +29,34 @@ fn unit_random() -> Vector3<f64> {
     .normalize()
 }
 
+/// Add drift noise to the problem in the direction of standard deviation of the problem. See
+/// [add_drift].
+pub fn add_drift_normalized<C: Camera>(
+    bal: BAProblem<C>,
+    strength: f64,
+    angle_strength: f64,
+    std: f64,
+) -> BAProblem<C> {
+    let dir = bal.std().normalize();
+    let bal_std = bal.std().magnitude();
+    add_drift(bal, strength * bal_std, angle_strength, std, dir)
+}
+
 /// Add drift-like noise to the problem. Each camera is transformed like so:
 /// d = ||-(R^T t)||
 /// R' = rotation_around_x(strength * gamma * d^1.2) * R
 /// t' = strength * d^2 * gamma * dir + t
 /// p' = strength * d^2 * gamma * dir + p
 /// where
-/// dir is the direction of standard deviation of the problem and gamma is a normal random variable
+/// and gamma is a normal random variable
 /// with standard deviation of std.
-pub fn add_drift<C>(bal: BAProblem<C>, strength: f64, angle_strength: f64, std: f64) -> BAProblem<C>
-where
-    C: Camera,
-{
-    // TODO: add twisting to the noise
-    // Choose the drift direction to be in line with the largest standard deviation.
-    let dir = bal.std().normalize();
-
+pub fn add_drift<C: Camera>(
+    bal: BAProblem<C>,
+    strength: f64,
+    angle_strength: f64,
+    std: f64,
+    dir: Vector3<f64>,
+) -> BAProblem<C> {
     let origin = bal
         .cameras
         .iter()
@@ -58,14 +70,11 @@ where
             }
         })
         .unwrap();
-
     let r = Normal::new(1.0, std.into());
-    let bal_std = bal.std().magnitude();
-
     let drift_noise = |x: Point3<f64>| {
         let distance = (x - origin).magnitude();
         let v = r.sample(&mut rand::thread_rng()) as f64;
-        dir * strength * v * bal_std * distance * distance
+        dir * strength * v * distance * distance
     };
     let drift_angle = |x: Point3<f64>| {
         let distance = (x - origin).magnitude();
@@ -74,18 +83,17 @@ where
     };
     let cameras = bal
         .cameras
-        .iter()
+        .into_iter()
         .map(|c| {
+            let center = c.center();
             c.transform(
-                Basis3::from_angle_x(Rad(drift_angle(c.center()))),
-                drift_noise(c.center()),
+                Basis3::from_angle_x(Rad(drift_angle(center))),
+                drift_noise(center),
                 Vector3::new(0.0, 0.0, 0.0),
             )
         })
         .collect();
-
     let points = bal.points.iter().map(|p| p + drift_noise(*p)).collect();
-
     BAProblem {
         cameras: cameras,
         points: points,
@@ -115,7 +123,7 @@ where
     let mut rng = rand::thread_rng();
     let cameras = bal
         .cameras
-        .iter()
+        .into_iter()
         .map(|c| {
             let dir = Basis3::from_axis_angle(unit_random(), Rad(n_rotation.sample(&mut rng)));
             let loc = unit_random() * bal_std * n_translation.sample(&mut rng) as f64;
@@ -358,5 +366,38 @@ where
         cameras: bal.cameras,
         points: bal.points,
         vis_graph: observations,
+    }
+}
+
+/// Add noise to the BAProblem in the form of a sin wave. Noise is `sin(dot(x,dir) * frequency * pi) *
+/// strength * noise_dir` where `x` is the normalized distance of the camera/point from the origin (in
+/// the range 0-1).
+pub fn add_sin_noise<C: Camera>(
+    ba: BAProblem<C>,
+    dir: Vector3<f64>,
+    noise_dir: Vector3<f64>,
+    strength: f64,
+    frequency: f64,
+) -> BAProblem<C> {
+    // Add epsilon to nonexistent dimensions
+    let dimension = ba.dimensions().map(|x| if x == 0.0 { 1e-8 } else { x });
+    let noise = |x: Point3<f64>| {
+        f64::sin(x.to_vec().div_element_wise(dimension).dot(dir) * frequency * std::f64::consts::PI)
+            * strength
+            * noise_dir.normalize()
+    };
+    let cameras = ba
+        .cameras
+        .into_iter()
+        .map(|c| {
+            let center = c.center();
+            c.transform(Basis3::one(), noise(center), Vector3::new(0., 0., 0.))
+        })
+        .collect();
+    let points = ba.points.into_iter().map(|p| p + noise(p)).collect();
+    BAProblem {
+        cameras: cameras,
+        points: points,
+        vis_graph: ba.vis_graph,
     }
 }
