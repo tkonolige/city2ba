@@ -89,7 +89,6 @@ pub fn add_drift<C: Camera>(
             c.transform(
                 Basis3::from_angle_x(Rad(drift_angle(center))),
                 drift_noise(center),
-                Vector3::new(0.0, 0.0, 0.0),
             )
         })
         .collect();
@@ -106,7 +105,6 @@ pub fn add_noise<C>(
     bal: BAProblem<C>,
     translation_std: f64,
     rotation_std: f64,
-    intrinsics_std: f64,
     point_std: f64,
     observations_std: f64,
 ) -> BAProblem<C>
@@ -115,7 +113,6 @@ where
 {
     let n_translation = Normal::new(0.0, translation_std.into());
     let n_rotation = Normal::new(0.0, rotation_std.into());
-    let n_intrinsics = Normal::new(0.0, intrinsics_std.into());
     let n_point = Normal::new(0.0, point_std.into());
     let n_observations = Normal::new(0.0, observations_std.into());
     let bal_std = bal.std().magnitude();
@@ -127,8 +124,7 @@ where
         .map(|c| {
             let dir = Basis3::from_axis_angle(unit_random(), Rad(n_rotation.sample(&mut rng)));
             let loc = unit_random() * bal_std * n_translation.sample(&mut rng) as f64;
-            let intrin = unit_random() * n_intrinsics.sample(&mut rng) as f64;
-            c.transform(dir, loc, intrin)
+            c.transform(dir, loc)
         })
         .collect();
 
@@ -391,7 +387,7 @@ pub fn add_sin_noise<C: Camera>(
         .into_iter()
         .map(|c| {
             let center = c.center();
-            c.transform(Basis3::one(), noise(center), Vector3::new(0., 0., 0.))
+            c.transform(Basis3::one(), noise(center))
         })
         .collect();
     let points = ba.points.into_iter().map(|p| p + noise(p)).collect();

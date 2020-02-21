@@ -3,6 +3,10 @@ use predicates::prelude::*;
 use std::path::*;
 use std::process::Command;
 use tempfile::tempdir;
+use city2ba::noise::*;
+use city2ba::synthetic::*;
+use city2ba::*;
+use cgmath::Vector3;
 
 #[test]
 fn synthetic_blocks() -> Result<(), Box<dyn std::error::Error>> {
@@ -121,4 +125,71 @@ fn from_box_path_ground() -> Result<(), Box<dyn std::error::Error>> {
         .stdout(predicate::str::contains("Total reprojection error"));
 
     Ok(())
+}
+
+fn test_grid() -> BAProblem<SnavelyCamera> {
+    synthetic_grid(10, 20, 3, 5., 1., 1., 1., 10., false)
+}
+
+#[test]
+fn normalized_drift() {
+    let ba = test_grid();
+    let err_start = ba.total_reprojection_error(2.0);
+    let ba = add_drift_normalized(ba, 0.1, 0.1, 0.1);
+    let err_end = ba.total_reprojection_error(2.0);
+    assert!(err_end > err_start);
+}
+
+#[test]
+fn noise() {
+    let ba = test_grid();
+    let err_start = ba.total_reprojection_error(2.0);
+    let ba = add_noise(ba, 0.1, 0.1, 0.1, 0.1);
+    let err_end = ba.total_reprojection_error(2.0);
+    assert!(err_end > err_start);
+}
+
+#[test]
+fn incorrect_correspondences() {
+    let ba = test_grid();
+    let err_start = ba.total_reprojection_error(2.0);
+    let ba = add_incorrect_correspondences(ba, 0.01);
+    let err_end = ba.total_reprojection_error(2.0);
+    assert!(err_end > err_start);
+}
+
+#[test]
+fn test_drop_features() {
+    let ba = test_grid();
+    let err_start = ba.total_reprojection_error(2.0);
+    let ba = drop_features(ba, 0.1);
+    let err_end = ba.total_reprojection_error(2.0);
+    assert!(err_end >= err_start);
+}
+
+#[test]
+fn test_split_landmarks() {
+    let ba = test_grid();
+    let err_start = ba.total_reprojection_error(2.0);
+    let ba = split_landmarks(ba, 0.1);
+    let err_end = ba.total_reprojection_error(2.0);
+    assert!(err_end >= err_start);
+}
+
+#[test]
+fn test_join_landmarks() {
+    let ba = test_grid();
+    let err_start = ba.total_reprojection_error(2.0);
+    let ba = join_landmarks(ba, 0.01);
+    let err_end = ba.total_reprojection_error(2.0);
+    assert!(err_end > err_start);
+}
+
+#[test]
+fn sin_noise() {
+    let ba = test_grid();
+    let err_start = ba.total_reprojection_error(2.0);
+    let ba = add_sin_noise(ba, Vector3::new(1.0, 1.0, 0.0), Vector3::unit_y(), 1., 2.);
+    let err_end = ba.total_reprojection_error(2.0);
+    assert!(err_end > err_start);
 }

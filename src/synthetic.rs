@@ -8,15 +8,16 @@ extern crate rayon;
 extern crate rstar;
 
 use cgmath::prelude::*;
-use cgmath::{Basis3, Point3, Vector3};
+use cgmath::{Basis3, Point3};
 use geo::Line;
-use indicatif::{ParallelProgressIterator, ProgressBar, ProgressStyle};
+use indicatif::{ParallelProgressIterator};
 use line_intersection::LineInterval;
 use rayon::prelude::*;
 use rstar::RTree;
 use std::convert::TryInto;
 
 use crate::baproblem::*;
+use crate::generate::progress_bar;
 
 #[derive(Debug, Clone, PartialEq, Copy)]
 struct WrappedPoint(Point3<f64>, usize);
@@ -88,8 +89,6 @@ fn hits_in_block(
                 start: start.into(),
                 end: end.into(),
             });
-            // println!("{:?}", side);
-
             match view_segment.relate(&side_segment).unique_intersection() {
                 // make sure we didn't hit the end point
                 Some(p) => ((end.0 - p.x()).powf(2.) + (end.1 - p.y())).sqrt() > 1e-8,
@@ -126,15 +125,18 @@ fn hits_building(c: Point3<f64>, p: Point3<f64>, block_length: f64, block_inset:
 }
 
 /// Generate a synthetic scene of buildings on a grid.
+///
+/// Verbose controls display of a progress bar.
 pub fn synthetic_grid<C>(
     num_cameras_per_block: usize,
     num_points_per_block: usize,
-    block_inset: f64,
     num_blocks: usize,
     block_length: f64,
+    block_inset: f64,
     camera_height: f64,
     point_height: f64,
     max_dist: f64,
+    verbose: bool,
 ) -> BAProblem<C>
 where
     C: Camera + Sync + Clone,
@@ -153,11 +155,7 @@ where
                     offset_z,
                 );
                 let dir_x = Basis3::from_angle_y(cgmath::Deg(-90.));
-                cameras.push(Camera::from_position_direction(
-                    loc_x,
-                    dir_x,
-                    Vector3::new(1.0, 0.0, 0.0),
-                ));
+                cameras.push(Camera::from_position_direction(loc_x, dir_x));
                 // vertical block
                 let loc_z = Point3::new(
                     offset_x,
@@ -165,11 +163,7 @@ where
                     offset_z + i as f64 / num_cameras_per_block as f64 * block_length,
                 );
                 let dir_z = Basis3::from_angle_z(cgmath::Deg(180.));
-                cameras.push(Camera::from_position_direction(
-                    loc_z,
-                    dir_z,
-                    Vector3::new(1.0, 0.0, 0.0),
-                ));
+                cameras.push(Camera::from_position_direction(loc_z, dir_z));
             }
         }
     }
@@ -205,15 +199,9 @@ where
             .map(|(i, p)| WrappedPoint(*p, i))
             .collect(),
     );
-    let pb = ProgressBar::new(cameras.len().try_into().unwrap());
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("[{bar:40}] {percent}% ({eta})")
-            .progress_chars("#-"),
-    );
     let visibility = cameras
         .par_iter()
-        .progress_with(pb)
+        .progress_with(progress_bar(cameras.len().try_into().unwrap(), "Computing visibility", verbose))
         .map(|camera: &C| {
             let mut obs = Vec::new();
             for p in rtree.locate_within_distance(

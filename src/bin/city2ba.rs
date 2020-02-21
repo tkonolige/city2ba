@@ -173,11 +173,6 @@ struct NoiseOpt {
     #[structopt(long = "observation-std", default_value = "0.0")]
     observation_std: f64,
 
-    /// Standard deviation of Gaussian noise added to camera intrinsics. Treats all intrinsics as
-    /// if they are at the same scale.
-    #[structopt(long = "intrinsic-std", default_value = "0.0")]
-    intrinsic_std: f64,
-
     /// Standard deviation of translational drift added to the problem. Drift is proportional to
     /// the distance of each camera and point from the origin. Drift is scaled relative to problem
     /// size.
@@ -303,7 +298,6 @@ fn run_noise(opt: NoiseOpt) -> Result<(), city2ba::Error> {
         bal,
         opt.translation_std,
         opt.rotation_std,
-        opt.intrinsic_std,
         opt.point_std,
         opt.observation_std,
     );
@@ -417,12 +411,13 @@ fn run_synthetic(opt: SyntheticOpt) -> Result<(), city2ba::Error> {
     let ba = synthetic_grid(
         opt.num_cameras_per_block,
         opt.num_points_per_block,
-        opt.block_inset,
         opt.num_blocks,
         opt.block_length,
+        opt.block_inset,
         opt.camera_height,
         opt.point_height,
         opt.max_dist,
+        true
     );
     println!("{}", ba);
     ba.write(&opt.output)?;
@@ -482,7 +477,7 @@ fn run_generate(opt: GenerateOpt) -> Result<(), city2ba::Error> {
     println!("Generated {} world points", points.len());
 
     // TODO: use something more sophisticated to calculate the max distance
-    let vis_graph = visibility_graph(&cscene, &cameras, &points, opt.max_dist);
+    let vis_graph = visibility_graph(&cscene, &cameras, &points, opt.max_dist, true);
     println!(
         "Computed visibility graph with {} edges",
         vis_graph.iter().map(|x| x.len()).sum::<usize>()
@@ -493,15 +488,18 @@ fn run_generate(opt: GenerateOpt) -> Result<(), city2ba::Error> {
         vis_graph: vis_graph,
     };
 
-    // TODO: sort cameras, points by xy location to have a less random matrix?
+    // TODO: sort cameras/points by xy location to have a less random matrix?
 
     // Remove cameras that view too few points and points that are viewed by too few cameras.
     let bal_lcc = if !opt.no_lcc { bal.cull() } else { bal };
+    if bal_lcc.num_cameras() == 0 || bal_lcc.num_points() == 0 {
+        return Err(city2ba::Error::EmptyProblem("No cameras remain".to_string()));
+    }
     println!(
         "Computed LCC with {} cameras, {} points, {} edges",
-        bal_lcc.cameras.len(),
-        bal_lcc.points.len(),
-        bal_lcc.vis_graph.iter().map(|x| x.len()).sum::<usize>()
+        bal_lcc.num_cameras(),
+        bal_lcc.num_points(),
+        bal_lcc.num_observations(),
     );
 
     println!(

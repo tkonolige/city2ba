@@ -30,6 +30,7 @@ use std::str::FromStr;
 #[derive(Debug)]
 pub enum Error {
     ParseError(String),
+    EmptyProblem(String),
     IOError(std::io::Error),
 }
 
@@ -62,6 +63,9 @@ fn to_rodrigues(x: Basis3<f64>) -> Vector3<f64> {
     axis.normalize() * angle
 }
 
+/// A projective camera.
+///
+/// The camera must have a center and a way to project points to and from the camera frame.
 pub trait Camera {
     /// Project a point from the world into the camera coordinate system
     fn project_world(&self, p: &Point3<f64>) -> Point3<f64>;
@@ -70,21 +74,16 @@ pub trait Camera {
     fn project(&self, p: cgmath::Point3<f64>) -> cgmath::Point2<f64>;
 
     /// Create a camera from a position and direction.
-    fn from_position_direction(
-        position: Point3<f64>,
-        dir: Basis3<f64>,
-        intrin: Vector3<f64>,
-    ) -> Self;
+    fn from_position_direction(position: Point3<f64>, dir: Basis3<f64>) -> Self;
 
     /// Center of the camera.
     fn center(&self) -> Point3<f64>;
 
-    /// Transform a camera with a rotation, translation, and intrinsics modification.
+    /// Transform a camera with a rotational and translational modification.
     fn transform(
         self,
         delta_dir: Basis3<f64>,
         delta_loc: Vector3<f64>,
-        delta_intrin: Vector3<f64>,
     ) -> Self;
 
     /// Project a point into this cameras frame of reference.
@@ -101,12 +100,10 @@ pub struct SnavelyCamera {
 }
 
 impl Camera for SnavelyCamera {
-    /// Project a point from the world into the camera coordinate system
     fn project_world(&self, p: &Point3<f64>) -> cgmath::Point3<f64> {
         self.dir.rotate_point(*p) + self.loc
     }
 
-    /// Project a point from camera space into pixel coordinates
     fn project(&self, p: cgmath::Point3<f64>) -> cgmath::Point2<f64> {
         let p_ = cgmath::Vector2::new(-p.x / p.z, -p.y / p.z);
         let r = 1.0
@@ -114,39 +111,31 @@ impl Camera for SnavelyCamera {
             + self.distortion().1 * p_.magnitude().powf(4.0);
         Point2::from_vec(self.focal_length() * r * p_)
     }
-    /// Create a camera from a position and direction.
-    fn from_position_direction(
-        position: Point3<f64>,
-        dir: Basis3<f64>,
-        intrin: Vector3<f64>,
-    ) -> Self {
+
+    fn from_position_direction(position: Point3<f64>, dir: Basis3<f64>) -> Self {
         SnavelyCamera {
             loc: -1.0 * (dir.rotate_point(position)).to_vec(),
             dir: dir,
-            intrin: intrin,
+            intrin: Vector3::new(1., 0., 0.),
         }
     }
 
-    /// Center of the camera. -(R^T t).
     fn center(&self) -> Point3<f64> {
         Point3::from_vec(-(self.dir.invert().rotate_vector(self.loc)))
     }
 
-    /// Transform a camera with a rotation, translation, and intrinsics modification.
     fn transform(
         self,
         delta_dir: Basis3<f64>,
         delta_loc: Vector3<f64>,
-        delta_intrin: Vector3<f64>,
     ) -> Self {
         SnavelyCamera {
             dir: self.dir * delta_dir,
             loc: -1.0 * self.dir.rotate_point(self.center() + delta_loc).to_vec(),
-            intrin: self.intrin + delta_intrin,
+            intrin: self.intrin,
         }
     }
 
-    /// Project a point into this cameras frame of reference.
     fn to_world(&self, p: Point3<f64>) -> Point3<f64> {
         self.dir.invert().rotate_point(p - self.loc)
     }
@@ -178,6 +167,7 @@ impl SnavelyCamera {
         ]
     }
 
+    /// R parameter of camera.
     pub fn rotation(&self) -> Basis3<f64> {
         self.dir
     }
@@ -188,6 +178,14 @@ impl SnavelyCamera {
 
     pub fn distortion(&self) -> (f64, f64) {
         (self.intrin[1], self.intrin[2])
+    }
+
+    pub fn modify_intrin(self, delta: Vector3<f64>) -> Self {
+        SnavelyCamera {
+            dir: self.dir,
+            loc: self.loc,
+            intrin: self.intrin + delta,
+        }
     }
 }
 
@@ -216,6 +214,9 @@ fn test_project_isomorphic() {
 }
 
 /// Bundle adjustment problem composed of cameras, points, and observations of points by cameras.
+///
+/// Observations are stored as an array of arrays where `v[i][j] = (k, (u, v))` indicates that camera
+/// `i` sees point `k` at `(u, v)` in the camera frame.
 #[derive(Debug, Clone)]
 pub struct BAProblem<C: Camera> {
     pub cameras: Vec<C>,
@@ -440,9 +441,8 @@ impl<C: Camera + Clone> BAProblem<C> {
             }
         }
 
-        let sets = uf.to_vec();
-
         // find largest set
+        let sets = uf.to_vec();
         let mut hm = HashMap::new();
         for i in 0..num_cameras {
             let x = hm.entry(sets[i]).or_insert(0);
@@ -521,6 +521,7 @@ impl BAProblem<SnavelyCamera> {
     /// Parse a bundle adjustment problem from a file in the Bundle Adjustment in the Large text
     /// file format.
     ///
+    /// ```txt
     /// <num_cameras> <num_points> <num_observations>
     /// <camera_index_1> <point_index_1> <x_1> <y_1>
     /// ...
@@ -531,8 +532,9 @@ impl BAProblem<SnavelyCamera> {
     /// <point_1>
     /// ...
     /// <point_num_points>
-    ///
+    /// ```
     /// where cameras are:
+    /// ```txt
     /// <R_1>
     /// <R_2>
     /// <R_3>
@@ -542,6 +544,7 @@ impl BAProblem<SnavelyCamera> {
     /// <focal length>
     /// <distortion^2>
     /// <distortion^4>
+    /// ```
     pub fn from_file_text(filepath: &Path) -> Result<Self, Error> {
         fn parse_internal(
             input: &str,

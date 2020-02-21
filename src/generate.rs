@@ -26,6 +26,23 @@ use cgmath::{Basis3, ElementWise, InnerSpace, Point3, Vector3, Vector4};
 use rayon::prelude::*;
 use rstar::RTree;
 
+
+pub (crate) fn progress_bar(length: u64, message: &str, verbose: bool) -> ProgressBar {
+    if !verbose {
+        return ProgressBar::hidden();
+    }
+
+    let pb = ProgressBar::new(length);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("{msg} [{bar:40}] {percent}% ({eta})")
+            .progress_chars("#-"),
+    );
+    pb.set_message(message);
+    pb
+}
+
+
 /// Convert a 3D model into geometry for fast intersection tests.
 pub fn model_to_geometry<'a>(
     model: &tobj::Model,
@@ -45,7 +62,6 @@ pub fn model_to_geometry<'a>(
                 model.mesh.indices[i * 3 + 2],
             );
         }
-
         for i in 0..num_vert {
             verts[i] = Vector4::new(
                 model.mesh.positions[i * 3],
@@ -63,14 +79,11 @@ pub fn model_to_geometry<'a>(
 
 /// Generate cameras along a path. Cameras will be pointed along the direction of movement of the
 /// path.
-pub fn generate_cameras_path<C>(
+pub fn generate_cameras_path<C: Camera>(
     _scene: &embree_rs::CommittedScene,
     path: &tobj::Model,
     num_cameras: usize,
-) -> Vec<C>
-where
-    C: Camera,
-{
+) -> Vec<C> {
     let vertices = path
         .mesh
         .positions
@@ -98,13 +111,10 @@ where
             let (x, y) = paths[i];
             let d = thread_rng().gen_range(0.0, 1.0);
             let dir = y - x;
-
             let pos = x + d * dir;
-
             Camera::from_position_direction(
                 pos,
                 Basis3::between_vectors(dir.normalize(), Vector3::new(0.0, 0.0, -1.0)),
-                Vector3::new(1.0, 0.0, 0.0),
             )
         })
         .collect()
@@ -161,7 +171,6 @@ where
         cameras.push(Camera::from_position_direction(
             pos,
             Basis3::between_vectors(dir.normalize(), Vector3::new(0.0, 0.0, -1.0)),
-            Vector3::new(1.0, 0.0, 0.0),
         ));
 
         // step to the next camera location
@@ -238,7 +247,7 @@ where
             // TODO: check that we are not too close to an object
             let dir = thread_rng().gen_range(0.0, 2.0 * std::f64::consts::PI);
             let around_z = Basis3::from_angle_y(cgmath::Rad(dir));
-            Camera::from_position_direction(position, around_z, Vector3::new(1.0, 0.0, 0.0))
+            Camera::from_position_direction(position, around_z)
         })
         .collect::<Vec<_>>()
 }
@@ -372,20 +381,14 @@ pub fn visibility_graph<C>(
     cameras: &Vec<C>,
     points: &Vec<Point3<f64>>,
     max_dist: f64,
+    verbose: bool,
 ) -> Vec<Vec<(usize, (f64, f64))>>
 where
     C: Camera + Sync,
 {
-    let pb = ProgressBar::new(cameras.len().try_into().unwrap());
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("[{bar:40}] {percent}% ({eta})")
-            .progress_chars("#-"),
-    );
-
     cameras
         .par_iter()
-        .progress_with(pb)
+        .progress_with(progress_bar(cameras.len().try_into().unwrap(), "Computing Visibility", verbose))
         .map(|camera| {
             let mut intersection_ctx = embree_rs::IntersectContext::coherent(); // not sure if this matters
 
