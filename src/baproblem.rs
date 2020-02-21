@@ -80,11 +80,7 @@ pub trait Camera {
     fn center(&self) -> Point3<f64>;
 
     /// Transform a camera with a rotational and translational modification.
-    fn transform(
-        self,
-        delta_dir: Basis3<f64>,
-        delta_loc: Vector3<f64>,
-    ) -> Self;
+    fn transform(self, delta_dir: Basis3<f64>, delta_loc: Vector3<f64>) -> Self;
 
     /// Project a point into this cameras frame of reference.
     fn to_world(&self, p: Point3<f64>) -> Point3<f64>;
@@ -128,11 +124,7 @@ impl Camera for SnavelyCamera {
         Point3::from_vec(-(self.dir.invert().rotate_vector(self.loc)))
     }
 
-    fn transform(
-        self,
-        delta_dir: Basis3<f64>,
-        delta_loc: Vector3<f64>,
-    ) -> Self {
+    fn transform(self, delta_dir: Basis3<f64>, delta_loc: Vector3<f64>) -> Self {
         SnavelyCamera {
             dir: self.dir * delta_dir,
             loc: -1.0 * self.dir.rotate_point(self.center() + delta_loc).to_vec(),

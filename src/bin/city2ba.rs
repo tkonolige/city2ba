@@ -417,7 +417,7 @@ fn run_synthetic(opt: SyntheticOpt) -> Result<(), city2ba::Error> {
         opt.camera_height,
         opt.point_height,
         opt.max_dist,
-        true
+        true,
     );
     println!("{}", ba);
     ba.write(&opt.output)?;
@@ -493,7 +493,9 @@ fn run_generate(opt: GenerateOpt) -> Result<(), city2ba::Error> {
     // Remove cameras that view too few points and points that are viewed by too few cameras.
     let bal_lcc = if !opt.no_lcc { bal.cull() } else { bal };
     if bal_lcc.num_cameras() == 0 || bal_lcc.num_points() == 0 {
-        return Err(city2ba::Error::EmptyProblem("No cameras remain".to_string()));
+        return Err(city2ba::Error::EmptyProblem(
+            "No cameras remain".to_string(),
+        ));
     }
     println!(
         "Computed LCC with {} cameras, {} points, {} edges",

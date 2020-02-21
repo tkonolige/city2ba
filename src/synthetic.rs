@@ -9,7 +9,7 @@ extern crate rstar;
 
 use cgmath::prelude::*;
 use cgmath::{Basis3, Point3};
-use indicatif::{ParallelProgressIterator};
+use indicatif::ParallelProgressIterator;
 use line_intersection::LineInterval;
 use rayon::prelude::*;
 use rstar::RTree;
@@ -200,7 +200,11 @@ where
     );
     let visibility = cameras
         .par_iter()
-        .progress_with(progress_bar(cameras.len().try_into().unwrap(), "Computing visibility", verbose))
+        .progress_with(progress_bar(
+            cameras.len().try_into().unwrap(),
+            "Computing visibility",
+            verbose,
+        ))
         .map(|camera: &C| {
             let mut obs = Vec::new();
             for p in rtree.locate_within_distance(

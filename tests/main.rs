@@ -1,12 +1,12 @@
 use assert_cmd::prelude::*;
+use cgmath::Vector3;
+use city2ba::noise::*;
+use city2ba::synthetic::*;
+use city2ba::*;
 use predicates::prelude::*;
 use std::path::*;
 use std::process::Command;
 use tempfile::tempdir;
-use city2ba::noise::*;
-use city2ba::synthetic::*;
-use city2ba::*;
-use cgmath::Vector3;
 
 #[test]
 fn synthetic_blocks() -> Result<(), Box<dyn std::error::Error>> {

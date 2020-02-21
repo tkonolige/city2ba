@@ -55,8 +55,7 @@ use cgmath::{Basis3, ElementWise, InnerSpace, Point3, Vector3, Vector4};
 use rayon::prelude::*;
 use rstar::RTree;
 
-
-pub (crate) fn progress_bar(length: u64, message: &str, verbose: bool) -> ProgressBar {
+pub(crate) fn progress_bar(length: u64, message: &str, verbose: bool) -> ProgressBar {
     if !verbose {
         return ProgressBar::hidden();
     }
@@ -70,7 +69,6 @@ pub (crate) fn progress_bar(length: u64, message: &str, verbose: bool) -> Progre
     pb.set_message(message);
     pb
 }
-
 
 /// Convert a 3D model into geometry for fast intersection tests.
 pub fn model_to_geometry<'a>(
@@ -417,7 +415,11 @@ where
 {
     cameras
         .par_iter()
-        .progress_with(progress_bar(cameras.len().try_into().unwrap(), "Computing Visibility", verbose))
+        .progress_with(progress_bar(
+            cameras.len().try_into().unwrap(),
+            "Computing Visibility",
+            verbose,
+        ))
         .map(|camera| {
             let mut intersection_ctx = embree_rs::IntersectContext::coherent(); // not sure if this matters
 
