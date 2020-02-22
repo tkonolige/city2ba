@@ -115,7 +115,7 @@ impl Camera for SnavelyCamera {
     fn from_position_direction(position: Point3<f64>, dir: Basis3<f64>) -> Self {
         SnavelyCamera {
             loc: -1.0 * (dir.rotate_point(position)).to_vec(),
-            dir: dir,
+            dir,
             intrin: Vector3::new(1., 0., 0.),
         }
     }
@@ -245,7 +245,7 @@ impl<C: Camera> BAProblem<C> {
         let num = (self.cameras.len() + self.points.len()) as f64;
         self.cameras
             .iter()
-            .map(|x| x.center().clone())
+            .map(|x| x.center())
             .chain(self.points.clone().into_iter())
             .fold(Vector3::new(0.0, 0.0, 0.0), |a, b| a + b.to_vec() / num)
     }
@@ -257,7 +257,7 @@ impl<C: Camera> BAProblem<C> {
         (self
             .cameras
             .iter()
-            .map(|x| x.center().clone())
+            .map(|x| x.center())
             .chain(self.points.clone().into_iter())
             .map(|x| (x.to_vec() - mean).mul_element_wise(x.to_vec() - mean))
             .sum::<Vector3<f64>>()
@@ -270,7 +270,7 @@ impl<C: Camera> BAProblem<C> {
         let min = self
             .cameras
             .iter()
-            .map(|x| x.center().clone())
+            .map(|x| x.center())
             .chain(self.points.clone().into_iter())
             .fold(
                 Vector3::new(std::f64::INFINITY, std::f64::INFINITY, std::f64::INFINITY),
@@ -279,7 +279,7 @@ impl<C: Camera> BAProblem<C> {
         let max = self
             .cameras
             .iter()
-            .map(|x| x.center().clone())
+            .map(|x| x.center())
             .chain(self.points.clone().into_iter())
             .fold(
                 Vector3::new(
@@ -311,8 +311,8 @@ impl<C: Camera> BAProblem<C> {
 
         BAProblem {
             cameras: cams,
-            points: points,
-            vis_graph: vis_graph,
+            points,
+            vis_graph,
         }
     }
 
@@ -332,7 +332,7 @@ impl<C: Camera> BAProblem<C> {
         }
         BAProblem {
             cameras: cams,
-            points: points,
+            points,
             vis_graph: obs,
         }
     }
@@ -358,10 +358,7 @@ impl<C: Camera + Clone> BAProblem<C> {
             .iter()
             .map(|i| self.cameras[*i].clone())
             .collect::<Vec<_>>();
-        let points = pi
-            .iter()
-            .map(|i| self.points[*i].clone())
-            .collect::<Vec<_>>();
+        let points = pi.iter().map(|i| self.points[*i]).collect::<Vec<_>>();
 
         // use i64 here so we can mark points that aren't in the final set
         let mut point_indices: Vec<i64> = vec![-1; self.points.len()];
@@ -375,14 +372,14 @@ impl<C: Camera + Clone> BAProblem<C> {
             .map(|obs| {
                 obs.iter()
                     .filter(|(i, _)| point_indices[*i] >= 0)
-                    .map(|(i, uv)| (point_indices[*i] as usize, uv.clone()))
+                    .map(|(i, uv)| (point_indices[*i] as usize, *uv))
                     .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
 
         BAProblem {
-            cameras: cameras,
-            points: points,
+            cameras,
+            points,
             vis_graph: obs,
         }
     }
@@ -419,7 +416,7 @@ impl<C: Camera + Clone> BAProblem<C> {
 
     /// Get the largest connected component of cameras and points.
     pub fn largest_connected_component(self) -> Self {
-        if self.num_cameras() <= 0 {
+        if self.num_cameras() == 0 {
             return self;
         }
 
@@ -441,8 +438,8 @@ impl<C: Camera + Clone> BAProblem<C> {
         // find largest set
         let sets = uf.to_vec();
         let mut hm = HashMap::new();
-        for i in 0..num_cameras {
-            let x = hm.entry(sets[i]).or_insert(0);
+        for s in sets.iter() {
+            let x = hm.entry(*s).or_insert(0);
             *x += 1;
         }
         let lcc_id = *(hm
@@ -492,9 +489,9 @@ impl<C: Camera + Clone> BAProblem<C> {
             .collect();
 
         BAProblem {
-            cameras: cameras,
-            points: points,
-            vis_graph: vis_graph,
+            cameras,
+            points,
+            vis_graph,
         }
     }
 
@@ -636,8 +633,8 @@ impl BAProblem<SnavelyCamera> {
             Ok((
                 input,
                 BAProblem {
-                    cameras: cameras,
-                    points: points,
+                    cameras,
+                    points,
                     vis_graph: observations,
                 },
             ))

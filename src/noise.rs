@@ -85,7 +85,7 @@ pub fn add_drift<C: Camera>(
             }
         })
         .unwrap();
-    let r = Normal::new(1.0, std.into());
+    let r = Normal::new(1.0, std);
     let drift_noise = |x: Point3<f64>| {
         let distance = (x - origin).magnitude();
         let v = r.sample(&mut rand::thread_rng()) as f64;
@@ -109,8 +109,8 @@ pub fn add_drift<C: Camera>(
         .collect();
     let points = bal.points.iter().map(|p| p + drift_noise(*p)).collect();
     BAProblem {
-        cameras: cameras,
-        points: points,
+        cameras,
+        points,
         vis_graph: bal.vis_graph,
     }
 }
@@ -126,10 +126,10 @@ pub fn add_noise<C>(
 where
     C: Camera,
 {
-    let n_translation = Normal::new(0.0, translation_std.into());
-    let n_rotation = Normal::new(0.0, rotation_std.into());
-    let n_point = Normal::new(0.0, point_std.into());
-    let n_observations = Normal::new(0.0, observations_std.into());
+    let n_translation = Normal::new(0.0, translation_std);
+    let n_rotation = Normal::new(0.0, rotation_std);
+    let n_point = Normal::new(0.0, point_std);
+    let n_observations = Normal::new(0.0, observations_std);
     let bal_std = bal.std().magnitude();
 
     let mut rng = rand::thread_rng();
@@ -163,15 +163,15 @@ where
                     let r = n_observations.sample(&mut rand::thread_rng()) as f64;
                     let x_ = x + nx / m * r;
                     let y_ = y + ny / m * r;
-                    (i.clone(), (x_, y_))
+                    (*i, (x_, y_))
                 })
                 .collect::<Vec<(usize, (f64, f64))>>()
         })
         .collect();
 
     BAProblem {
-        cameras: cameras,
-        points: points,
+        cameras,
+        points,
         vis_graph: observations,
     }
 }
@@ -198,7 +198,7 @@ where
                             })
                             .collect::<Vec<_>>();
                         // TODO: use max?
-                        dists[i] = 10000000000.0;
+                        dists[i] = std::f64::INFINITY;
                         let mut weights = dists.iter().map(|x| -x).collect::<Vec<_>>();
                         weights[i] = 0.0;
                         let m = weights.iter().fold(1. / 0., |a: f64, b: &f64| a.min(*b));
@@ -282,7 +282,7 @@ where
 
     BAProblem {
         cameras: bal.cameras,
-        points: points,
+        points,
         vis_graph: observations,
     }
 }
@@ -329,10 +329,7 @@ where
             bal.points
                 .iter()
                 .enumerate()
-                .map(|(i, x)| IndexedVector3 {
-                    id: i,
-                    p: x.clone(),
-                })
+                .map(|(i, x)| IndexedVector3 { id: i, p: *x })
                 .collect(),
         );
 
@@ -407,8 +404,8 @@ pub fn add_sin_noise<C: Camera>(
         .collect();
     let points = ba.points.into_iter().map(|p| p + noise(p)).collect();
     BAProblem {
-        cameras: cameras,
-        points: points,
+        cameras,
+        points,
         vis_graph: ba.vis_graph,
     }
 }

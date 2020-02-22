@@ -354,8 +354,8 @@ impl rstar::Point for WrappedPoint {
 /// Generate points uniformly in the world. Points are culled if they are more than `max_dist` from
 /// all cameras. Gives at most `num_points`.
 pub fn generate_world_points_uniform<C>(
-    models: &Vec<tobj::Model>,
-    cameras: &Vec<C>,
+    models: &[tobj::Model],
+    cameras: &[C],
     num_points: usize,
     max_dist: f64,
 ) -> Vec<Point3<f64>>
@@ -390,9 +390,10 @@ where
         let (v0, v1, v2) = get_triangle(mesh, j);
         let p = random_point_in_triangle(v0, v1, v2);
         // check if point is close enough
-        if let Some(_) = rtree
+        if rtree
             .locate_within_distance(WrappedPoint(p), max_dist * max_dist)
             .next()
+            .is_some()
         {
             points.push(p);
         }
@@ -405,8 +406,8 @@ where
 /// dropped.
 pub fn visibility_graph<C>(
     scene: &embree_rs::CommittedScene,
-    cameras: &Vec<C>,
-    points: &Vec<Point3<f64>>,
+    cameras: &[C],
+    points: &[Point3<f64>],
     max_dist: f64,
     verbose: bool,
 ) -> Vec<Vec<(usize, (f64, f64))>>
@@ -475,10 +476,10 @@ pub fn move_to_origin(models: Vec<tobj::Model>) -> Vec<tobj::Model> {
                 .positions
                 .chunks(3)
                 .map(|chunk| Vector3::new(chunk[0], chunk[1], chunk[2]))
-                .fold1(|x, y| min_vec(x, y))
+                .fold1(min_vec)
                 .unwrap()
         })
-        .fold1(|x, y| min_vec(x, y))
+        .fold1(min_vec)
         .unwrap();
 
     models

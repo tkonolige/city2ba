@@ -23,7 +23,7 @@ use structopt::StructOpt;
 
 // helper to parse Vector3 with structopt
 fn parse_vec3(s: &str) -> Result<Vector3<f64>, std::num::ParseFloatError> {
-    let mut it = s.split(",").map(|x| f64::from_str(x));
+    let mut it = s.split(',').map(|x| f64::from_str(x));
     let x = it.next().unwrap()?;
     let y = it.next().unwrap()?;
     let z = it.next().unwrap()?;
@@ -322,9 +322,9 @@ fn run_noise(opt: NoiseOpt) -> Result<(), city2ba::Error> {
 /// Write camera locations out to a ply file. Cameras are red, points are green.
 fn write_cameras<C: Camera>(
     path: &std::path::Path,
-    cameras: &Vec<C>,
-    points: &Vec<Point3<f64>>,
-    observations: &Vec<Vec<(usize, (f64, f64))>>,
+    cameras: &[C],
+    points: &[Point3<f64>],
+    observations: &[Vec<(usize, (f64, f64))>],
 ) -> Result<(), std::io::Error> {
     let mut ply = Ply::<DefaultElement>::new();
     let mut point_element = ElementDef::new("vertex".to_string());
@@ -482,11 +482,7 @@ fn run_generate(opt: GenerateOpt) -> Result<(), city2ba::Error> {
         "Computed visibility graph with {} edges",
         vis_graph.iter().map(|x| x.len()).sum::<usize>()
     );
-    let bal = BAProblem {
-        cameras: cameras,
-        points: points,
-        vis_graph: vis_graph,
-    };
+    let bal = BAProblem::from_visibility(cameras, points, vis_graph);
 
     // TODO: sort cameras/points by xy location to have a less random matrix?
 
