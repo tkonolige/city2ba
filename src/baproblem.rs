@@ -59,8 +59,12 @@ fn from_rodrigues(x: Vector3<f64>) -> Basis3<f64> {
 fn to_rodrigues(x: Basis3<f64>) -> Vector3<f64> {
     let q = Quaternion::from(x);
     let angle = 2.0 * q.s.acos();
-    let axis = q.v / (1.0 - q.s * q.s).sqrt();
-    axis.normalize() * angle
+    if (1. - q.s * q.s) < std::f64::EPSILON {
+        Vector3::zero()
+    } else {
+        let axis = q.v / (1.0 - q.s * q.s).sqrt();
+        axis.normalize() * angle
+    }
 }
 
 /// A projective camera.
