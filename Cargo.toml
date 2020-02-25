@@ -11,7 +11,7 @@ build = "build.rs"
 edition = "2018"
 
 [dependencies]
-tobj = {git = "https://github.com/tkonolige/tobj.git"}
+tobj = "0.1.12"
 cgmath = "0.17"
 structopt = "0.3"
 rand = "0.6"
