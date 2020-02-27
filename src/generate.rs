@@ -362,6 +362,10 @@ pub fn generate_world_points_uniform<C>(
 where
     C: Camera,
 {
+    if cameras.len() == 0 {
+        panic!("Cannot generate world points with 0 cameras.");
+    }
+
     // TODO: filter meshes by distance from cameras
     let areas = models.iter().flat_map(|model| {
         iter_triangles(&model.mesh)
@@ -383,7 +387,9 @@ where
     let rtree = RTree::bulk_load(cameras.iter().map(|c| WrappedPoint(c.center())).collect());
 
     let mut points = Vec::with_capacity(num_points);
-    while points.len() < num_points {
+    let mut fail_count = 0;
+    let fail_threshold = 10*num_points;
+    while points.len() < num_points && fail_count < fail_threshold {
         let i = dist.sample(&mut rng);
         let (m, j) = indices[i];
         let mesh = &models[m].mesh;
@@ -396,7 +402,13 @@ where
             .is_some()
         {
             points.push(p);
+        } else {
+            fail_count += 1;
         }
+    }
+
+    if fail_count >= fail_threshold {
+        panic!("Failed to generate enough points. {} successes, {} failures, {} requested points.", points.len(), fail_count, num_points);
     }
 
     points
