@@ -1,6 +1,6 @@
 [package]
 name = "city2ba"
-version = "1.0.0"
+version = "1.1.0"
 authors = ["Tristan Konolige <tristan.konolige@gmail.com>"]
 license = "BSD-2-Clause"
 homepage = "https://github.com/tkonolige/city2ba"
