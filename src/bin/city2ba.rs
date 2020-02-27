@@ -152,6 +152,41 @@ struct SyntheticOpt {
 }
 
 #[derive(StructOpt, Debug)]
+struct SyntheticLineOpt {
+    /// Number of cameras to generate
+    #[structopt(long = "cameras", default_value = "10")]
+    num_cameras: usize,
+
+    /// Number of points to generate.
+    #[structopt(long = "points", default_value = "10")]
+    num_points: usize,
+
+    /// Maximum viewing distance of a point by a camera.
+    #[structopt(long = "max-dist", default_value = "10")]
+    max_dist: f64,
+
+    /// Height of cameras placed in the world.
+    #[structopt(long = "camera-height", default_value = "1")]
+    camera_height: f64,
+
+    /// Height of points placed in the world.
+    #[structopt(long = "point-height", default_value = "1")]
+    point_height: f64,
+
+    /// Offset of points to the left and right of the cameras.
+    #[structopt(long = "point-offset", default_value = "1")]
+    point_offset: f64,
+
+    /// Length of the line path.
+    #[structopt(long = "length", default_value = "20")]
+    length: f64,
+
+    /// Output file in .bal or .bbal format.
+    #[structopt(name = "OUTPUT", parse(from_os_str))]
+    output: std::path::PathBuf,
+}
+
+#[derive(StructOpt, Debug)]
 struct NoiseOpt {
     /// Input bundle adjustment problem. Should be in .bal or .bbal file format.
     #[structopt(name = "FILE", parse(from_os_str))]
@@ -236,6 +271,8 @@ enum Opt {
     Generate(GenerateOpt),
     /// Generate a synthetic bundle adjustment problem from an grid of city blocks.
     Synthetic(SyntheticOpt),
+    /// Generate a synthetic bundle adjustment problem on a line.
+    SyntheticLine(SyntheticLineOpt),
     /// Add noise to a bundle adjustment problem.
     Noise(NoiseOpt),
 }
@@ -424,6 +461,22 @@ fn run_synthetic(opt: SyntheticOpt) -> Result<(), city2ba::Error> {
     Ok(())
 }
 
+fn run_synthetic_line(opt: SyntheticLineOpt) -> Result<(), city2ba::Error> {
+    let ba = synthetic_line(
+        opt.num_cameras,
+        opt.num_points,
+        opt.length,
+        opt.point_offset,
+        opt.camera_height,
+        opt.point_height,
+        opt.max_dist,
+        true,
+    );
+    println!("{}", ba);
+    ba.write(&opt.output)?;
+    Ok(())
+}
+
 fn run_generate(opt: GenerateOpt) -> Result<(), city2ba::Error> {
     let city_obj = tobj::load_obj(&opt.input);
     let (mut models, _) = city_obj.unwrap();
@@ -515,6 +568,7 @@ fn main() -> Result<(), city2ba::Error> {
         Opt::Generate(opt) => run_generate(opt),
         Opt::Noise(opt) => run_noise(opt),
         Opt::Synthetic(opt) => run_synthetic(opt),
+        Opt::SyntheticLine(opt) => run_synthetic_line(opt),
         Opt::PLY(opt) => run_ply(opt),
     }
 }
