@@ -40,6 +40,23 @@ impl From<std::io::Error> for Error {
     }
 }
 
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Error::ParseError(s) => write!(f, "{}", s),
+            Error::EmptyProblem(s) => write!(f, "{}", s),
+            Error::IOError(s) => write!(f, "{}", s),
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        // Generic error, underlying cause isn't tracked.
+        None
+    }
+}
+
 #[test]
 fn rodrigues_idempotent() {
     let vecs = [Vector3::new(1., 2., 3.),

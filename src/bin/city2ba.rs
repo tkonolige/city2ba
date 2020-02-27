@@ -478,8 +478,11 @@ fn run_synthetic_line(opt: SyntheticLineOpt) -> Result<(), city2ba::Error> {
 }
 
 fn run_generate(opt: GenerateOpt) -> Result<(), city2ba::Error> {
-    let city_obj = tobj::load_obj(&opt.input);
-    let (mut models, _) = city_obj.unwrap();
+    let city_obj = tobj::load_obj(&opt.input).map_err(|err| match err {
+        tobj::LoadError::OpenFileFailed => city2ba::Error::IOError(std::io::Error::new(std::io::ErrorKind::NotFound, format!("Could not open file {:?}", opt.input))),
+        e => city2ba::Error::IOError(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, format!("Load error: {}", e))),
+    })?;
+    let (mut models, _) = city_obj;
 
     let model_path = if let Some(path) = opt.path {
         let i = models.iter().position(|x| x.name == path);
@@ -542,9 +545,9 @@ fn run_generate(opt: GenerateOpt) -> Result<(), city2ba::Error> {
     // Remove cameras that view too few points and points that are viewed by too few cameras.
     let bal_lcc = if !opt.no_lcc { bal.cull() } else { bal };
     if bal_lcc.num_cameras() == 0 || bal_lcc.num_points() == 0 {
-        return Err(city2ba::Error::EmptyProblem(
+        Err(city2ba::Error::EmptyProblem(
             "No cameras remain".to_string(),
-        ));
+        ))?;
     }
     println!(
         "Computed LCC with {} cameras, {} points, {} edges",
