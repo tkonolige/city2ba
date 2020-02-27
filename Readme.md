@@ -3,7 +3,7 @@
 
 A collection of tools for generating synthetic bundle adjustment datasets.
 
-Datasets can either be generated programatically via the library or using the included executables.
+Datasets can either be generated programatically via the library or using the included executables. When using `SnavelyCamera`s, the coordinate system is -z forward, y up.
 
 ```bash
 # Generate a problem from a 3D model
