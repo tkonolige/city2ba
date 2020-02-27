@@ -40,6 +40,18 @@ impl From<std::io::Error> for Error {
     }
 }
 
+#[test]
+fn rodrigues_idempotent() {
+    let vecs = [Vector3::new(1., 2., 3.),
+                Vector3::new(0., 0., 0.),
+                Vector3::new(-1.2, 0., 1.7),
+    ];
+    for v in vecs.iter() {
+        let v_ = to_rodrigues(from_rodrigues(*v));
+        assert!((v_ - v).magnitude() < 1e-10, "{:?} != {:?}", v, v_);
+    }
+}
+
 /// Convert Rodrigues vector to a rotation.
 fn from_rodrigues(x: Vector3<f64>) -> Basis3<f64> {
     let theta2 = x.dot(x);
