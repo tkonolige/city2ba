@@ -9,6 +9,7 @@ readme = "Readme.md"
 description = "A tool for generating synthetic bundle adjustment problems"
 build = "build.rs"
 edition = "2018"
+exclude = ["paper.md", ".github"]
 
 [dependencies]
 tobj = "0.1.12"
@@ -33,6 +34,3 @@ geo = "0.4"
 assert_cmd = "0.12"
 predicates = "1"
 tempfile = "3"
-
-[package]
-exclude = ["paper.md", ".github"]
