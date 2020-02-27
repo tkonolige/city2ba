@@ -1,4 +1,5 @@
 # City2BA
+[![docs.rs](https://docs.rs/city2ba/badge.svg)](https://docs.rs/city2ba)
 
 A collection of tools for generating synthetic bundle adjustment datasets.
 
