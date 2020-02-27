@@ -33,3 +33,6 @@ geo = "0.4"
 assert_cmd = "0.12"
 predicates = "1"
 tempfile = "3"
+
+[package]
+exclude = ["paper.md", ".github"]
