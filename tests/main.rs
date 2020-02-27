@@ -193,3 +193,9 @@ fn sin_noise() {
     let err_end = ba.total_reprojection_error(2.0);
     assert!(err_end > err_start);
 }
+
+#[test]
+fn test_line() {
+    let ba = synthetic_line::<SnavelyCamera>(30, 40, 10., 1., 1., 1., 10., false);
+    assert!(ba.num_cameras() > 20, "num_cameras: {}", ba.num_cameras());
+}

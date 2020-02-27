@@ -123,9 +123,42 @@ fn hits_building(c: Point3<f64>, p: Point3<f64>, block_length: f64, block_inset:
     .any(|x| x)
 }
 
-/// Generate a synthetic scene of buildings on a grid.
+/// Generate a synthetic scene of buildings on a 2D grid.
 ///
-/// Verbose controls display of a progress bar.
+/// ```txt
+///  num_cameras_per_block
+///  ----------------
+///  * * * * * * * * * * * * * * *   |
+///  *               *               | block inset
+///  *  +---------+  *  +---------+  |
+///  *  |         |  *  |         |
+///  *  |         |  *  |         |
+///  *  |         |  *  |         |
+///  *  |         |  *  |         |
+///  *  +---------+  *  +---------+
+///  *               *
+///  * * * * * * * * * * * * * * *
+///  *               *
+///  *  +---------+  *  +---------+
+///  *  |         |  *  |         |
+///  *  |         |  *  |         |
+///  *  |         |  *  |         |
+///  *  |         |  *  |         |
+///  *  +---------+  *  +---------+
+///                     -----------
+///                     points_per_block
+///  ```
+///
+/// ## Arguments
+/// - `num_cameras_per_block`: number of cameras per grid block.
+/// - `num_points_per_block`: number of points per grid block.
+/// - `num_blocks`: grid is `num_blocks` by `num_blocks`.
+/// - `block_length`: the length of each block.
+/// - `block_inset`: offset between cameras and points on a block.
+/// - `camera_height`: height of cameras from the ground (in y).
+/// - `point_height`: height of points from the ground (in y).
+/// - `max_dist`: maximum distance between a camera and a point for visibility.
+/// - `verbose`: should a progress bar be displayed.
 pub fn synthetic_grid<C>(
     num_cameras_per_block: usize,
     num_points_per_block: usize,
@@ -140,7 +173,7 @@ pub fn synthetic_grid<C>(
 where
     C: Camera + Sync + Clone,
 {
-    assert!(block_inset * 2. < block_length);
+    assert!(block_inset * 2. < block_length, "Block inset ({}) must be less than half the block length ({}), to not violate physical constraints.", block_inset, block_length);
     let mut cameras = Vec::new();
     for bx in 0..num_blocks {
         let offset_x = block_length * bx as f64;
@@ -229,5 +262,78 @@ where
         })
         .collect();
 
+    BAProblem::from_visibility(cameras, points, visibility).cull()
+}
+
+/// Generate a series of synthetic cameras in a line.
+///
+/// ## Arguments
+/// - `num_cameras`: number of cameras to generate. Final number of cameras might be slightly less.
+/// - `num_points`: number of points to generate. Final number of points might be slightly less.
+/// - `length`: length of the line the cameras are placed on.
+/// - `point_offset`: points are placed this distance to the right and left of the cameras.
+/// - `camera_height`: height of cameras from the ground (in y).
+/// - `point_height`: height of points from the ground (in y).
+/// - `max_dist`: maximum distance between a camera and a point for visibility.
+/// - `verbose`: should a progress bar be displayed.
+pub fn synthetic_line<C: Camera + Sync + Clone>(
+    num_cameras: usize,
+    num_points: usize,
+    length: f64,
+    point_offset: f64,
+    camera_height: f64,
+    point_height: f64,
+    max_dist: f64,
+    verbose: bool,
+) -> BAProblem<C> {
+    let cameras = (0..num_cameras).map(|i| {
+        let loc = Point3::new(0., camera_height, i as f64 * length / (num_cameras - 1) as f64);
+        let dir = Basis3::from_angle_y(cgmath::Deg(180.));
+        Camera::from_position_direction(loc, dir)
+    }).collect::<Vec<_>>();
+    let points = (0..num_points).map(|i| {
+        let z = (i/2) as f64 * length / (num_points/2 - 1) as f64;
+        let x = if i%2 == 0 {
+            -point_offset
+        } else {
+            point_offset
+        };
+        Point3::new(x, point_height, z)
+    }).collect::<Vec<_>>();
+
+    let rtree = RTree::bulk_load(
+        points
+            .iter()
+            .enumerate()
+            .map(|(i, p)| WrappedPoint(*p, i))
+            .collect(),
+    );
+    let visibility = cameras
+        .par_iter()
+        .progress_with(progress_bar(
+            cameras.len().try_into().unwrap(),
+            "Computing visibility",
+            verbose,
+        ))
+        .map(|camera: &C| {
+            let mut obs = Vec::new();
+            for p in rtree.locate_within_distance(
+                WrappedPoint(camera.center(), std::usize::MAX),
+                max_dist * max_dist,
+            ) {
+                let WrappedPoint(point, pi) = p;
+
+                let p_camera = camera.project_world(point);
+                // camera looks down -z
+                if (camera.center() - point).magnitude() < max_dist && p_camera.z <= 0. {
+                    let p = camera.project(p_camera);
+                    if p.x >= -1. && p.x <= 1. && p.y >= -1. && p.y <= 1. {
+                        obs.push((*pi, (p.x, p.y)));
+                    }
+                }
+            }
+            obs
+        })
+        .collect();
     BAProblem::from_visibility(cameras, points, visibility).cull()
 }
