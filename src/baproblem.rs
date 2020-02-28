@@ -27,10 +27,14 @@ use std::iter::FromIterator;
 use std::path::Path;
 use std::str::FromStr;
 
+/// Possible errors in generating and reading bundle adjustment problems.
 #[derive(Debug)]
 pub enum Error {
+    /// Failure to parse problem from a file.
     ParseError(String),
+    /// Problem contains no cameras or points.
     EmptyProblem(String),
+    /// Failure read/write a problem.
     IOError(std::io::Error),
 }
 
@@ -115,7 +119,7 @@ pub trait Camera {
     /// Transform a camera with a rotational and translational modification.
     fn transform(self, delta_dir: Basis3<f64>, delta_loc: Vector3<f64>) -> Self;
 
-    /// Project a point into this cameras frame of reference.
+    /// Project a point in this camera's coordinate system into the world.
     fn to_world(&self, p: Point3<f64>) -> Point3<f64>;
 }
 
@@ -128,7 +132,7 @@ pub struct SnavelyCamera {
     pub loc: Vector3<f64>,
     /// Rotational parameter `R`
     pub dir: Basis3<f64>,
-    /// Intrinsics `intrin[0]` is the focal length, `intrin[1]` is the squared distortion, and `intrin[2]` is the quadratic distortion.
+    /// Intrinsics. `intrin[0]` is the focal length, `intrin[1]` is the squared distortion, and `intrin[2]` is the quadratic distortion.
     pub intrin: Vector3<f64>,
 }
 

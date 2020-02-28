@@ -1,7 +1,7 @@
 //! Functions for adding noise to bundle adjustment problems.
 //!
-//! BAProblems generated from the `generate` or `synthetic` modules do not contain any noise. They
-//! have zero error. Test software against bundle adjustment problems, error needs to be added in.
+//! [../BAProblem]s generated from the [../generate] or [../synthetic] modules do not contain any noise.
+//! To test software against bundle adjustment problems, error needs to be added in.
 //! Many different kinds of error exist, but usual sources of error in bundle adjustment problems
 //! include:
 //! - Error from incorrect camera intrinsics.
@@ -380,6 +380,11 @@ where
 /// Add noise to the BAProblem in the form of a sin wave. Noise is `sin(dot(x,dir) * frequency * pi) *
 /// strength * noise_dir` where `x` is the normalized distance of the camera/point from the origin (in
 /// the range 0-1).
+///
+/// This error is a good choice if you want to test the scalability of a bundle adjuster in the
+/// face of long range effects. This noise tends to have few outliers, so bundle adjusters end up
+/// see only the long rang effect. `strength` and `frequency` should remain constant over the set
+/// of problems being used for scaling tests.
 pub fn add_sin_noise<C: Camera>(
     ba: BAProblem<C>,
     dir: Vector3<f64>,

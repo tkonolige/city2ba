@@ -1,4 +1,4 @@
-//! Functions to generate camera and point locations on a model.
+//! Functions to generate camera and point locations on a 3D model.
 //!
 //! Example usage:
 //! ```
