@@ -1,0 +1,23 @@
+{
+  "@context": "https://raw.githubusercontent.com/codemeta/codemeta/master/codemeta.jsonld",
+  "@type": "Code",
+  "author": [
+    {
+      "@id": "http://orcid.org/0000-0002-5052-6479",
+      "@type": "Person",
+      "email": "tristan.konolige@colorado.edu",
+      "name": "Tristan Konolige",
+      "affiliation": "University of Colorado Boulder"
+    }
+  ],
+  "identifier": "",
+  "codeRepository": "https://github.com/tkonolige/city2ba",
+  "datePublished": "2020-02-28",
+  "dateModified": "2020-02-28",
+  "dateCreated": "2020-02-28",
+  "description": "Tools for generating synthetic bundle adjustment datasets",
+  "keywords": "bundle adjustment, structure from motion, 3D reconstruction",
+  "license": "BSD-2-Clause",
+  "title": "city2ba",
+  "version": "v1.1.0"
+}
