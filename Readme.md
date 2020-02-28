@@ -50,3 +50,7 @@ Executables can be run with:
 ```bash
 cargo --release ARGS GO HERE
 ```
+
+## Contributing and Support
+
+Please use the GitHub issue tracker to report issues, ask questions, and submit patches.
