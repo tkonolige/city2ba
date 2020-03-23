@@ -479,8 +479,14 @@ fn run_synthetic_line(opt: SyntheticLineOpt) -> Result<(), city2ba::Error> {
 
 fn run_generate(opt: GenerateOpt) -> Result<(), city2ba::Error> {
     let city_obj = tobj::load_obj(&opt.input).map_err(|err| match err {
-        tobj::LoadError::OpenFileFailed => city2ba::Error::IOError(std::io::Error::new(std::io::ErrorKind::NotFound, format!("Could not open file {:?}", opt.input))),
-        e => city2ba::Error::IOError(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, format!("Load error: {}", e))),
+        tobj::LoadError::OpenFileFailed => city2ba::Error::IOError(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("Could not open file {:?}", opt.input),
+        )),
+        e => city2ba::Error::IOError(std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            format!("Load error: {}", e),
+        )),
     })?;
     let (mut models, _) = city_obj;
 

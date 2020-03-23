@@ -156,7 +156,8 @@ fn hits_building(c: Point3<f64>, p: Point3<f64>, block_length: f64, block_inset:
 /// - `block_length`: the length of each block.
 /// - `block_inset`: offset between cameras and points on a block.
 /// - `camera_height`: height of cameras from the ground (in y).
-/// - `point_height`: height of points from the ground (in y).
+/// - `point_height`: height of points from the ground (in y). Points are also added at y=0 at
+///    block_inset/2.
 /// - `max_dist`: maximum distance between a camera and a point for visibility.
 /// - `verbose`: should a progress bar be displayed.
 pub fn synthetic_grid<C>(
@@ -175,50 +176,83 @@ where
 {
     assert!(block_inset * 2. < block_length, "Block inset ({}) must be less than half the block length ({}), to not violate physical constraints.", block_inset, block_length);
     let mut cameras = Vec::new();
-    for bx in 0..num_blocks {
+    for bx in 0..=num_blocks {
         let offset_x = block_length * bx as f64;
-        for by in 0..num_blocks {
+        for by in 0..=num_blocks {
             let offset_z = block_length * by as f64;
             for i in 0..num_cameras_per_block {
                 // horizontal block
-                let loc_x = Point3::new(
-                    offset_x + i as f64 / num_cameras_per_block as f64 * block_length,
-                    camera_height,
-                    offset_z,
-                );
-                let dir_x = Basis3::from_angle_y(cgmath::Deg(-90.));
-                cameras.push(Camera::from_position_direction(loc_x, dir_x));
+                if bx != num_blocks {
+                    let loc_x = Point3::new(
+                        offset_x + i as f64 / num_cameras_per_block as f64 * block_length,
+                        camera_height,
+                        offset_z,
+                    );
+                    let dir_x = Basis3::from_angle_y(cgmath::Deg(-90.));
+                    cameras.push(Camera::from_position_direction(loc_x, dir_x));
+                    let dir_x = Basis3::from_angle_y(cgmath::Deg(90.));
+                    cameras.push(Camera::from_position_direction(loc_x, dir_x));
+                }
                 // vertical block
-                let loc_z = Point3::new(
-                    offset_x,
-                    camera_height,
-                    offset_z + i as f64 / num_cameras_per_block as f64 * block_length,
-                );
-                let dir_z = Basis3::from_angle_z(cgmath::Deg(180.));
-                cameras.push(Camera::from_position_direction(loc_z, dir_z));
+                if by != num_blocks {
+                    let loc_z = Point3::new(
+                        offset_x,
+                        camera_height,
+                        offset_z + i as f64 / num_cameras_per_block as f64 * block_length,
+                    );
+                    let dir_z = Basis3::from_angle_y(cgmath::Deg(180.));
+                    cameras.push(Camera::from_position_direction(loc_z, dir_z));
+                    let dir_z = Basis3::one();
+                    cameras.push(Camera::from_position_direction(loc_z, dir_z));
+                }
             }
         }
     }
 
-    // Points need to be on each side of the cameras
+    // Points need to be on each side of the cameras and below them
     let mut points = Vec::new();
-    for bx in 0..num_blocks {
+    for bx in 0..=num_blocks {
         let offset_x = block_length * bx as f64;
-        for by in 0..num_blocks {
+        for by in 0..=num_blocks {
             let offset_z = block_length * by as f64;
             for i in 0..num_points_per_block {
+                let step = (block_length - block_inset * 2.) / num_points_per_block as f64;
                 // horizontal block, both left and right
-                let loc_x = offset_x
-                    + block_inset
-                    + i as f64 / num_points_per_block as f64 * (block_length - block_inset * 2.);
-                points.push(Point3::new(loc_x, point_height, offset_z - block_inset));
-                points.push(Point3::new(loc_x, point_height, offset_z + block_inset));
+                if bx != num_blocks {
+                    let loc_x = offset_x + block_inset + i as f64 * step;
+                    points.push(Point3::new(loc_x, point_height, offset_z - block_inset));
+                    points.push(Point3::new(loc_x, point_height, offset_z + block_inset));
+                    points.push(Point3::new(loc_x + step / 2., 0., offset_z - block_inset));
+                    points.push(Point3::new(loc_x + step / 2., 0., offset_z + block_inset));
+                    points.push(Point3::new(
+                        loc_x + step / 2.,
+                        0.,
+                        offset_z - block_inset / 2.,
+                    ));
+                    points.push(Point3::new(
+                        loc_x + step / 2.,
+                        0.,
+                        offset_z + block_inset / 2.,
+                    ));
+                }
                 // vertical block, both left and right
-                let loc_z = offset_z
-                    + block_inset
-                    + i as f64 / num_points_per_block as f64 * (block_length - block_inset * 2.);
-                points.push(Point3::new(offset_x - block_inset, point_height, loc_z));
-                points.push(Point3::new(offset_x + block_inset, point_height, loc_z));
+                if by != num_blocks {
+                    let loc_z = offset_z + block_inset + i as f64 * step;
+                    points.push(Point3::new(offset_x - block_inset, point_height, loc_z));
+                    points.push(Point3::new(offset_x + block_inset, point_height, loc_z));
+                    points.push(Point3::new(offset_x - block_inset, 0., loc_z + step / 2.));
+                    points.push(Point3::new(offset_x + block_inset, 0., loc_z + step / 2.));
+                    points.push(Point3::new(
+                        offset_x - block_inset / 2.,
+                        0.,
+                        loc_z + step / 2.,
+                    ));
+                    points.push(Point3::new(
+                        offset_x + block_inset / 2.,
+                        0.,
+                        loc_z + step / 2.,
+                    ));
+                }
             }
         }
     }
@@ -262,7 +296,7 @@ where
         })
         .collect();
 
-    BAProblem::from_visibility(cameras, points, visibility).cull()
+    BAProblem::from_visibility(cameras, points, visibility) // .cull()
 }
 
 /// Generate a series of synthetic cameras in a line.
@@ -286,20 +320,28 @@ pub fn synthetic_line<C: Camera + Sync + Clone>(
     max_dist: f64,
     verbose: bool,
 ) -> BAProblem<C> {
-    let cameras = (0..num_cameras).map(|i| {
-        let loc = Point3::new(0., camera_height, i as f64 * length / (num_cameras - 1) as f64);
-        let dir = Basis3::from_angle_y(cgmath::Deg(180.));
-        Camera::from_position_direction(loc, dir)
-    }).collect::<Vec<_>>();
-    let points = (0..num_points).map(|i| {
-        let z = (i/2) as f64 * length / (num_points/2 - 1) as f64;
-        let x = if i%2 == 0 {
-            -point_offset
-        } else {
-            point_offset
-        };
-        Point3::new(x, point_height, z)
-    }).collect::<Vec<_>>();
+    let cameras = (0..num_cameras)
+        .map(|i| {
+            let loc = Point3::new(
+                0.,
+                camera_height,
+                i as f64 * length / (num_cameras - 1) as f64,
+            );
+            let dir = Basis3::from_angle_y(cgmath::Deg(180.));
+            Camera::from_position_direction(loc, dir)
+        })
+        .collect::<Vec<_>>();
+    let points = (0..num_points)
+        .map(|i| {
+            let z = (i / 2) as f64 * length / (num_points / 2 - 1) as f64;
+            let x = if i % 2 == 0 {
+                -point_offset
+            } else {
+                point_offset
+            };
+            Point3::new(x, point_height, z)
+        })
+        .collect::<Vec<_>>();
 
     let rtree = RTree::bulk_load(
         points

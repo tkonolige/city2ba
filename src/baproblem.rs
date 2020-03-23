@@ -63,9 +63,10 @@ impl std::error::Error for Error {
 
 #[test]
 fn rodrigues_idempotent() {
-    let vecs = [Vector3::new(1., 2., 3.),
-                Vector3::new(0., 0., 0.),
-                Vector3::new(-1.2, 0., 1.7),
+    let vecs = [
+        Vector3::new(1., 2., 3.),
+        Vector3::new(0., 0., 0.),
+        Vector3::new(-1.2, 0., 1.7),
     ];
     for v in vecs.iter() {
         let v_ = to_rodrigues(from_rodrigues(*v));
