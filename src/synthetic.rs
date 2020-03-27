@@ -296,7 +296,7 @@ where
         })
         .collect();
 
-    BAProblem::from_visibility(cameras, points, visibility) // .cull()
+    BAProblem::from_visibility(cameras, points, visibility).cull()
 }
 
 /// Generate a series of synthetic cameras in a line.
