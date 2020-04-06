@@ -766,7 +766,7 @@ impl BAProblem<SnavelyCamera> {
     /// Write BAProblem to a file in BAL format. Text or binary format is automatically chosen from
     /// the filename extension. `.bal` -> text, `.bbal` -> binary.
     pub fn write(&self, path: &std::path::Path) -> Result<(), std::io::Error> {
-        match path.extension().unwrap().to_str().unwrap() {
+        match path.extension().ok_or(std::io::Error::new(std::io::ErrorKind::InvalidInput, "file does not have an extension"))?.to_str().unwrap() {
             "bal" => self.write_text(path),
             "bbal" => self.write_binary(path),
             ext => Err(std::io::Error::new(
