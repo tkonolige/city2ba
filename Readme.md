@@ -7,7 +7,7 @@ Datasets can either be generated programatically via the library or using the in
 
 ```bash
 # Generate a problem from a 3D model
-city2ba generate test_scene.obj problem.bal --num-cameras 100 --num-points 200
+city2ba generate test_scene.obj problem.bal --cameras 100 --points 200
 
 # Add noise to the problem
 city2ba noise problem.bal problem_noised.bal --drift-strength 0.001 --rotation-std 0.0001
@@ -25,14 +25,26 @@ First install embree (available at [https://github.com/embree/embree](https://gi
 
 To install the latest stable version run:
 ```bash
-cargo install city2ba
+EMBREE_DIR=/path/to/embree/lib cargo install city2ba
 ```
+Make sure to point `EMBREE_DIR` to the `lib` directory inside of the directory
+where you installed embree.
+
 To build the latest version run:
 ```bash
 git clone https://github.com/tkonolige/city2ba.git
 cd city2ba
-cargo install --path .
+EMBREE_DIR=/path/to/embree/lib cargo install --path .
 ```
+Make sure to point `EMBREE_DIR` to the `lib` directory inside of the directory
+where you installed embree.
+
+The `city2ba` binary is installed into `$HOME/.cargo/bin`. In order to run the
+binary you will need to add this directory to your `PATH` (you can do this with
+`export PATH="$HOME/.cargo/bin:$PATH"`, you may want to add this to your
+`.bashrc` or equivalent).
+
+A simple scene is provided in `test_scene.obj` for you to experiment with. You can download it from [https://github.com/tkonolige/city2ba/raw/master/test_scene.obj](https://github.com/tkonolige/city2ba/raw/master/test_scene.obj).
 
 ## Development
 

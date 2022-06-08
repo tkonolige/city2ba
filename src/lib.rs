@@ -15,7 +15,7 @@
 //! This crate also provides command line tools for generating bundle adjustment datasets:
 //! ```bash
 //! # Generate a problem from a 3D model
-//! city2ba generate model.obj problem.bal --num-cameras 100 --num-points 200
+//! city2ba generate test_scene.obj problem.bal --cameras 100 --points 200
 //!
 //! # Add noise to the problem
 //! city2ba noise problem.bal problem_noised.bal --drift-strength 0.001 --rotation-std 0.0001
