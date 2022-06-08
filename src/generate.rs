@@ -363,7 +363,7 @@ where
     C: Camera,
 {
     if cameras.len() == 0 {
-        panic!("Cannot generate world points with 0 cameras.");
+        panic!("Cannot generate world points with 0 cameras. Try increasing the number of cameras generated (via --cameras).");
     }
 
     // TODO: filter meshes by distance from cameras
