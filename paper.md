@@ -31,14 +31,20 @@ Synthetic dataset generation can either use an existing 3D model (in `.obj` form
 The user can specify the problem size as well as parameters like number of 3D points and maximum distance between a camera and an observed point.
 The user can also modify problem structure by using different 3D models or placing different camera paths.
 Cameras can either be generated in a streetview-like scenario where cameras are placed along a path, or placed in random locations in the geometry.
-Synthetic datasets have zero error and so are useful in testing the accuracy and correctness of different methods.
-To test different algorithms, the ground truth datasets need some form of added error.
-The tools we provide can add a variety of different types of error to simulate different inaccuracies in SfM methods.
-For example, we provide long range drifting effects that mimic error from accelerometer noise. 
-These features allow users to test the scalability of their algorithm over a variety of scenarios and types of noise.
 
 **City2BA** is provided both as a set of command line tools (for convenience) and as a library (for extensibility).
 Currently, **City2BA** ships with a single camera model commonly used in the literature (see @agarwal2010bundle), but the user can add their own camera model if they so choose.
 It is optimized and can generate very large models (100,000 cameras, 1,000,000) in less than an hour.
+
+# Statement of Need
+
+Synthetic datasets have zero error and so are useful in testing the accuracy and correctness of different methods.
+To test different algorithms, the ground truth datasets need some form of added error.
+The tools we provide can add a variety of different types of error to simulate different inaccuracies in SfM methods.
+For example, we provide long range drifting effects that mimic error from accelerometer noise.
+These features allow users to test the scalability of their algorithm over a variety of scenarios and types of noise.
+
+
+
 
 # References
